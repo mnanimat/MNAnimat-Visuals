@@ -1,0 +1,6 @@
+{
+  "name": "MNAnimat Visuals",
+  "description": "Suite criativa profissional: Apresentações, Documentos, Vídeo Timeline, Pintura Digital com Pressão, Vetores de Precisão, Renderizador 3D WebGL e Colaboração.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
