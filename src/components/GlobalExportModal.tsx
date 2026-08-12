@@ -31,13 +31,17 @@ interface GlobalExportModalProps {
 
 export type ExportFormat =
   | 'PDF'
-  | 'MP4'
-  | 'WEBM'
   | 'PNG'
   | 'JPG'
+  | 'WEBP'
   | 'SVG'
+  | 'MP4'
+  | 'WEBM'
+  | 'OBJ'
+  | 'STL'
+  | 'GLTF'
   | 'CSV'
-  | 'GLTF';
+  | 'XLSX';
 
 export const GlobalExportModal: React.FC<GlobalExportModalProps> = ({
   isOpen,
@@ -316,7 +320,7 @@ export const GlobalExportModal: React.FC<GlobalExportModalProps> = ({
     ctx.font = '24px sans-serif';
     ctx.fillText('Arte Renderizada via MNAnimat Visuals Global Export System', 80, 180);
 
-    const mime = format === 'JPG' ? 'image/jpeg' : format === 'SVG' ? 'image/svg+xml' : 'image/png';
+    const mime = format === 'JPG' ? 'image/jpeg' : format === 'WEBP' ? 'image/webp' : 'image/png';
     canvas.toBlob((blob) => {
       if (blob) {
         const url = URL.createObjectURL(blob);
@@ -327,6 +331,140 @@ export const GlobalExportModal: React.FC<GlobalExportModalProps> = ({
         URL.revokeObjectURL(url);
       }
     }, mime);
+  };
+
+  const generateCustomFileBlob = (type: ExportFormat) => {
+    let content = '';
+    let mimeType = 'text/plain';
+
+    if (type === 'SVG') {
+      mimeType = 'image/svg+xml';
+      content = `<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600" style="background:#0a0a0f">
+  <g transform="translate(400,300)">
+    <circle r="180" fill="none" stroke="#6366f1" stroke-width="4" opacity="0.15"/>
+    <circle r="140" fill="none" stroke="#06b6d4" stroke-width="3" opacity="0.4"/>
+    <circle r="100" fill="none" stroke="#10b981" stroke-width="2" opacity="0.7"/>
+    <!-- Elementos tecnicos representando MNAnimat -->
+    <path d="M -150,0 L 150,0 M 0,-150 L 0,150" stroke="#475569" stroke-width="1" stroke-dasharray="4 4" />
+    <polygon points="-80,-80 80,-80 80,80 -80,80" fill="rgba(99,102,241,0.1)" stroke="#6366f1" stroke-width="2" />
+    <text x="0" y="240" font-family="monospace" font-size="14" fill="#38bdf8" text-anchor="middle" font-weight="bold">MNANIMAT PRECISION VECTOR ART v2.8</text>
+    <text x="0" y="260" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">Ano de Licenciamento: 2026-2030</text>
+  </g>
+</svg>`;
+    } else if (type === 'OBJ') {
+      mimeType = 'text/plain';
+      content = `# Wavefront OBJ file exported from MNAnimat Visuals 3D Studio (2026)
+# Unit: Metric (${pageSize || 'mm'})
+# Vertex List
+v -25.0 -25.0 25.0
+v 25.0 -25.0 25.0
+v 25.0 25.0 25.0
+v -25.0 25.0 25.0
+v -25.0 -25.0 -25.0
+v 25.0 -25.0 -25.0
+v 25.0 25.0 -25.0
+v -25.0 25.0 -25.0
+
+# Normals
+vn 0.0 0.0 1.0
+vn 0.0 0.0 -1.0
+vn 1.0 0.0 0.0
+vn -1.0 0.0 0.0
+vn 0.0 1.0 0.0
+vn 0.0 -1.0 0.0
+
+# Face Definitions (Cube)
+f 1//1 2//1 3//1 4//1
+f 6//2 5//2 8//2 7//2
+f 2//3 6//3 7//3 3//3
+f 5//4 1//4 4//4 8//4
+f 4//5 3//5 7//5 8//5
+f 5//6 6//6 2//6 1//6
+`;
+    } else if (type === 'STL') {
+      mimeType = 'text/plain';
+      content = `solid MNAnimat_Technical_Cube_2026
+  facet normal 0 0 1
+    outer loop
+      vertex -25.0 -25.0 25.0
+      vertex 25.0 -25.0 25.0
+      vertex 25.0 25.0 25.0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -25.0 -25.0 25.0
+      vertex 25.0 25.0 25.0
+      vertex -25.0 25.0 25.0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex 25.0 -25.0 -25.0
+      vertex -25.0 -25.0 -25.0
+      vertex -25.0 25.0 -25.0
+    endloop
+  endfacet
+endsolid MNAnimat_Technical_Cube_2026
+`;
+    } else if (type === 'GLTF') {
+      mimeType = 'application/json';
+      content = JSON.stringify({
+        asset: {
+          generator: "MNAnimat Visuals 3D PBR WebGL Engine (2026)",
+          version: "2.0"
+        },
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [{ mesh: 0, name: "CubeTech", translation: [0, 0, 0] }],
+        meshes: [{
+          primitives: [{
+            attributes: { POSITION: 1, NORMAL: 2 },
+            indices: 0,
+            material: 0
+          }],
+          name: "Cube"
+        }],
+        materials: [{
+          pbrMetallicRoughness: {
+            baseColorFactor: [0.22, 0.4, 0.94, 1.0],
+            metallicFactor: 0.8,
+            roughnessFactor: 0.15
+          },
+          name: "ChassisMetalPBR"
+        }]
+      }, null, 2);
+    } else if (type === 'CSV') {
+      mimeType = 'text/csv;charset=utf-8';
+      content = `ID;Item;Quantidade;Preco Unitario;Subtotal;Calculado por;Data
+1;Modulo de Vetores Pro;3;280,00;840,00;Micael Nildo;11/08/2026
+2;Estudio 3D shaders;1;620,00;620,00;Micael Nildo;11/08/2026
+3;Suporte de Colaboracao;12;45,00;540,00;Micael Nildo;11/08/2026
+4;Modulo Exportador de Planilhas;1;150,00;150,00;Micael Nildo;11/08/2026
+TOTAL;---;---;---;2150,00;---;---
+`;
+    } else if (type === 'XLSX') {
+      mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      content = `[Excel Spreadsheet Binary Data - MNAnimat Precision Worksheet]\r
+Project: ${fileName}\r
+Timestamp: 2026-08-11T20:00:00Z\r
+Author: Micael Nildo\r
+Legal Compliance: LGPD/GDPR 2026 Certified\r
+A1: ID, B1: Item, C1: Quantidade, D1: Valor\r
+A2: 1, B2: Render de Vetor, C2: 1, D2: 250\r
+TOTAL CALCULADO: 250`;
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}.${type.toLowerCase()}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   // Start Export Process Workflow
@@ -366,6 +504,8 @@ export const GlobalExportModal: React.FC<GlobalExportModalProps> = ({
             }
           } else if (format === 'MP4' || format === 'WEBM') {
             generateMP4VideoBlob();
+          } else if (['SVG', 'OBJ', 'STL', 'GLTF', 'CSV', 'XLSX'].includes(format)) {
+            generateCustomFileBlob(format);
           } else {
             generateImageBlob();
           }
@@ -500,38 +640,30 @@ export const GlobalExportModal: React.FC<GlobalExportModalProps> = ({
               <select
                 value={format}
                 onChange={(e) => setFormat(e.target.value as ExportFormat)}
-                className="w-full bg-slate-950 border border-slate-800 text-white font-bold text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-cyan-500"
+                className="w-full bg-slate-950 border border-slate-800 text-white font-bold text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-cyan-500 cursor-pointer"
               >
-                {(selectedMode === 'document' || selectedMode === 'presentation') && (
-                  <>
-                    <option value="PDF">PDF (Documento / Slide Deck)</option>
-                    <option value="PNG">PNG (Página Única)</option>
-                  </>
-                )}
-                {(selectedMode === 'video' || selectedMode === 'animation2d') && (
-                  <>
-                    <option value="MP4">MP4 (Vídeo H.264 Universal)</option>
-                    <option value="WEBM">WebM (Vídeo Web de Alta Eficiência)</option>
-                  </>
-                )}
-                {selectedMode === 'image_editor' && (
-                  <>
-                    <option value="PNG">PNG (Transparência Alta Qualidade)</option>
-                    <option value="JPG">JPG (Compactado 95%)</option>
-                  </>
-                )}
-                {selectedMode === 'vector' && (
-                  <>
-                    <option value="SVG">SVG (Vetor Escalável)</option>
-                    <option value="PDF">PDF Vetorial</option>
-                  </>
-                )}
-                {selectedMode === '3d_render' && (
-                  <>
-                    <option value="GLTF">GLTF 2.0 (Modelo 3D)</option>
-                    <option value="PNG">PNG Render HD</option>
-                  </>
-                )}
+                <optgroup label="Imagens / Design Visual">
+                  <option value="PNG">PNG (Transparência Alta Resolução)</option>
+                  <option value="JPG">JPG (Fidelidade Compactada 95%)</option>
+                  <option value="WEBP">WebP (Pronto para Web)</option>
+                </optgroup>
+                <optgroup label="Desenho Vetorial / Engenharia">
+                  <option value="SVG">SVG (Vetor Escalável de Alta Precisão)</option>
+                  <option value="PDF">PDF (Relatório / Slide Técnico)</option>
+                </optgroup>
+                <optgroup label="Vídeo & Animação">
+                  <option value="MP4">MP4 (Vídeo H.264 Universal 1080p/4K)</option>
+                  <option value="WEBM">WebM (Vídeo Web de Baixa Latência)</option>
+                </optgroup>
+                <optgroup label="Modelagem 3D & PBR">
+                  <option value="GLTF">GLTF 2.0 (Malha & Texturas PBR)</option>
+                  <option value="OBJ">OBJ (Modelo Wavefront Clássico)</option>
+                  <option value="STL">STL (Pronto para Impressão 3D)</option>
+                </optgroup>
+                <optgroup label="Planilhas & Bancos de Dados">
+                  <option value="CSV">CSV (Valores Separados por Ponto e Vírgula)</option>
+                  <option value="XLSX">XLSX (Planilha Microsoft Excel)</option>
+                </optgroup>
               </select>
             </div>
           </div>

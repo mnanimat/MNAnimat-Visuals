@@ -8,6 +8,7 @@ import { LayoutCustomizerModal } from './components/LayoutCustomizerModal';
 import { GlobalExportModal } from './components/GlobalExportModal';
 import { CollaborativeCursors } from './components/CollaborativeCursors';
 import { FloatingWindowManager } from './components/FloatingWindowManager';
+import { LoginAndProjects } from './components/LoginAndProjects';
 
 import { PaintingStudio } from './components/modes/PaintingStudio';
 import { VectorStudio } from './components/modes/VectorStudio';
@@ -59,11 +60,49 @@ const INITIAL_WINDOWS: FloatingWindow[] = [
 ];
 
 export default function App() {
-  const [currentMode, setCurrentMode] = useState<AppMode>('painting');
+  const [currentMode, setCurrentMode] = useState<AppMode>('vector');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('shared') === 'true') return true;
+    return localStorage.getItem('mn_user_logged') === 'true';
+  });
+
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('shared') === 'true') {
+      return urlParams.get('project') || 'proj_default';
+    }
+    return localStorage.getItem('mn_active_project_id');
+  });
+
   const [cloudConfig, setCloudConfig] = useState<CloudStorageConfig>(getInitialCloudConfig());
-  const [activeLayoutName, setActiveLayoutName] = useState<string>('Pintura e Ilustração');
+  const [activeLayoutName, setActiveLayoutName] = useState<string>('Desenho Vetorial');
   const [cursorsEnabled, setCursorsEnabled] = useState<boolean>(true);
   const [floatingWindows, setFloatingWindows] = useState<FloatingWindow[]>(INITIAL_WINDOWS);
+
+  // Automatically adjust currentMode if active project dictates it
+  useEffect(() => {
+    if (activeProjectId) {
+      localStorage.setItem('mn_active_project_id', activeProjectId);
+      const saved = localStorage.getItem('mn_user_projects');
+      if (saved) {
+        try {
+          const list = JSON.parse(saved);
+          const found = list.find((p: any) => p.id === activeProjectId);
+          if (found) {
+            setCurrentMode(found.mode);
+            if (found.mode === 'painting') setActiveLayoutName('Pintura e Ilustração');
+            else if (found.mode === '3d_render') setActiveLayoutName('Modelagem 3D');
+            else setActiveLayoutName('Desenho Vetorial');
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    } else {
+      localStorage.removeItem('mn_active_project_id');
+    }
+  }, [activeProjectId]);
 
   // Auto-Save State
   const [lastAutoSaveTime, setLastAutoSaveTime] = useState<Date | null>(new Date());
@@ -248,6 +287,32 @@ export default function App() {
     }
   };
 
+  if (!isLoggedIn || !activeProjectId) {
+    return (
+      <LoginAndProjects
+        isLoggedIn={isLoggedIn}
+        activeProjectId={activeProjectId}
+        onLoginSuccess={(userName, userAge) => {
+          setIsLoggedIn(true);
+        }}
+        onSelectProject={(projectId, projectMode) => {
+          setCurrentMode(projectMode);
+          setActiveProjectId(projectId);
+        }}
+        onLogout={() => {
+          setIsLoggedIn(false);
+          setActiveProjectId(null);
+          localStorage.removeItem('mn_user_logged');
+          localStorage.removeItem('mn_active_project_id');
+        }}
+        onBackToDashboard={() => {
+          const savedProj = localStorage.getItem('mn_active_project_id') || 'proj_default';
+          setActiveProjectId(savedProj);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-950 font-sans text-slate-100 overflow-hidden antialiased relative">
       {/* Real-time Collaboration Live Cursors Overlay */}
@@ -274,6 +339,7 @@ export default function App() {
         onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
         onOpenLayoutModal={() => setIsLayoutModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenDashboard={() => setActiveProjectId(null)}
         collaborators={collaborators}
         activeLayoutName={activeLayoutName}
         onUndo={undoState?.canUndo ? undoState.undo : undefined}

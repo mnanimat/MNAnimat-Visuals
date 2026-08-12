@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { MousePointer2, Sparkles, Eye, EyeOff, Radio } from 'lucide-react';
+import { MousePointer2, Sparkles, Radio } from 'lucide-react';
 import { AppMode } from '../types';
 
 export interface RemoteUser {
@@ -11,7 +11,6 @@ export interface RemoteUser {
   mode?: AppMode;
   activeTool?: string;
   lastUpdated?: number;
-  isSimulated?: boolean;
 }
 
 interface CollaborativeCursorsProps {
@@ -23,77 +22,125 @@ interface CollaborativeCursorsProps {
 export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
   currentMode,
   enabled = true,
-  onToggleEnabled,
 }) => {
   const [remoteUsers, setRemoteUsers] = useState<Record<string, RemoteUser>>({});
   const [clickRipples, setClickRipples] = useState<
     { id: string; x: number; y: number; color: string }[]
   >([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const animRef = useRef<number | null>(null);
+  
+  const myIdRef = useRef<string>('');
+  const myNameRef = useRef<string>('');
+  const myColorRef = useRef<string>('');
 
-  // Simulated collaborators when alone to demonstrate real-time indicators
-  const simulatedRef = useRef<{
-    user1: RemoteUser;
-    user2: RemoteUser;
-    angle1: number;
-    angle2: number;
-  }>({
-    user1: {
-      id: 'sim_ana',
-      name: 'Ana (Design UX)',
-      color: '#06b6d4',
-      x: 350,
-      y: 220,
-      mode: 'vector',
-      activeTool: 'Pen Bézier',
-      isSimulated: true,
-    },
-    user2: {
-      id: 'sim_carlos',
-      name: 'Carlos (3D & FX)',
-      color: '#ec4899',
-      x: 620,
-      y: 380,
-      mode: '3d_render',
-      activeTool: 'Texturas PBR',
-      isSimulated: true,
-    },
-    angle1: 0,
-    angle2: Math.PI / 2,
-  });
+  const channelRef = useRef<BroadcastChannel | null>(null);
 
-  // Track mouse position and send over WebSocket
+  // Initialize refs on component mount
+  useEffect(() => {
+    let savedId = localStorage.getItem('mn_my_collab_id');
+    if (!savedId) {
+      savedId = 'user_' + Math.random().toString(36).substring(2, 9);
+      localStorage.setItem('mn_my_collab_id', savedId);
+    }
+    myIdRef.current = savedId;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const isShared = urlParams.get('shared') === 'true';
+    if (isShared) {
+      myNameRef.current = 'Visitante Técnico (Remoto)';
+      myColorRef.current = '#10b981';
+    } else {
+      const savedUser = localStorage.getItem('mn_user_name');
+      myNameRef.current = savedUser ? `${savedUser} (Autor)` : 'Membro da Equipe';
+      myColorRef.current = '#ec4899';
+    }
+  }, []);
+
+  // Initialize Broadcast Channel
+  useEffect(() => {
+    if (!enabled) return;
+
+    try {
+      const channel = new BroadcastChannel('mnanimat_collab_cursors');
+      channelRef.current = channel;
+
+      channel.onmessage = (event) => {
+        const data = event.data;
+        if (!data || data.senderId === myIdRef.current) return;
+
+        if (data.type === 'cursor_move') {
+          setRemoteUsers((prev) => ({
+            ...prev,
+            [data.senderId]: {
+              id: data.senderId,
+              name: data.name,
+              color: data.color,
+              x: data.x,
+              y: data.y,
+              mode: data.mode,
+              activeTool: data.activeTool,
+              lastUpdated: Date.now(),
+            },
+          }));
+        } else if (data.type === 'click_event') {
+          const rippleId = Math.random().toString();
+          setClickRipples((prev) => [
+            ...prev.slice(-10),
+            { id: rippleId, x: data.x, y: data.y, color: data.color },
+          ]);
+          setTimeout(() => {
+            setClickRipples((prev) => prev.filter((r) => r.id !== rippleId));
+          }, 800);
+        }
+      };
+
+      return () => {
+        channel.close();
+      };
+    } catch (e) {
+      console.warn('BroadcastChannel not supported or failed:', e);
+    }
+  }, [enabled]);
+
+  // Broadcast own mouse movements
   useEffect(() => {
     if (!enabled) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const x = e.clientX;
-      const y = e.clientY;
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(
-          JSON.stringify({
-            type: 'cursor',
-            x,
-            y,
-            mode: currentMode,
-            activeTool: 'Ponteiro',
-          })
-        );
+      if (channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'cursor_move',
+          senderId: myIdRef.current,
+          name: myNameRef.current,
+          color: myColorRef.current,
+          x: e.clientX,
+          y: e.clientY,
+          mode: currentMode,
+          activeTool: 'Ponteiro Ativo',
+        });
       }
     };
 
     const handleClick = (e: MouseEvent) => {
-      // Create subtle local click ripple for feedback
+      // Local ripple feedback
       const rippleId = Math.random().toString();
       setClickRipples((prev) => [
         ...prev.slice(-10),
-        { id: rippleId, x: e.clientX, y: e.clientY, color: '#38bdf8' },
+        { id: rippleId, x: e.clientX, y: e.clientY, color: myColorRef.current },
       ]);
       setTimeout(() => {
         setClickRipples((prev) => prev.filter((r) => r.id !== rippleId));
       }, 800);
+
+      // Broadcast click event
+      if (channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'click_event',
+          senderId: myIdRef.current,
+          color: myColorRef.current,
+          x: e.clientX,
+          y: e.clientY,
+        });
+      }
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -105,132 +152,34 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
     };
   }, [currentMode, enabled]);
 
-  // Establish WebSocket Connection
+  // Clean stale cursors (inactive for > 4 seconds)
   useEffect(() => {
-    if (!enabled) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/collaborate`;
-
-    try {
-      const socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'cursor_update') {
-            setRemoteUsers((prev) => ({
-              ...prev,
-              [data.id]: {
-                id: data.id,
-                name: data.name || 'Colaborador',
-                color: data.color || '#3b82f6',
-                x: data.x,
-                y: data.y,
-                mode: data.mode,
-                activeTool: data.activeTool,
-                lastUpdated: Date.now(),
-              },
-            }));
-          } else if (data.type === 'presence') {
-            const list = data.users || [];
-            const newUsersMap: Record<string, RemoteUser> = {};
-            list.forEach((u: any) => {
-              newUsersMap[u.id] = {
-                id: u.id,
-                name: u.name,
-                color: u.color,
-                x: u.x,
-                y: u.y,
-                mode: u.mode,
-                activeTool: u.activeTool,
-                lastUpdated: Date.now(),
-              };
-            });
-            setRemoteUsers(newUsersMap);
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setRemoteUsers((prev) => {
+        const updated = { ...prev };
+        let changed = false;
+        Object.keys(updated).forEach((id) => {
+          if (now - (updated[id].lastUpdated || 0) > 4000) {
+            delete updated[id];
+            changed = true;
           }
-        } catch (err) {
-          // parse error
-        }
-      };
+        });
+        return changed ? updated : prev;
+      });
+    }, 2000);
 
-      return () => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.close();
-        }
-      };
-    } catch (e) {
-      console.warn('WebSocket connection fallback:', e);
-    }
-  }, [enabled]);
-
-  // Smooth animation loop for simulated team cursors when single-user
-  useEffect(() => {
-    if (!enabled) return;
-
-    let lastTime = performance.now();
-    const updateSimulated = (now: number) => {
-      const delta = (now - lastTime) / 1000;
-      lastTime = now;
-
-      simulatedRef.current.angle1 += delta * 0.8;
-      simulatedRef.current.angle2 += delta * 0.6;
-
-      const a1 = simulatedRef.current.angle1;
-      const a2 = simulatedRef.current.angle2;
-
-      // Lissajous curve paths across workspace
-      const x1 = Math.round(450 + Math.sin(a1) * 220 + Math.cos(a1 * 0.5) * 80);
-      const y1 = Math.round(280 + Math.cos(a1 * 1.2) * 140);
-
-      const x2 = Math.round(750 + Math.cos(a2 * 0.7) * 200);
-      const y2 = Math.round(420 + Math.sin(a2 * 1.1) * 160);
-
-      simulatedRef.current.user1.x = x1;
-      simulatedRef.current.user1.y = y1;
-      simulatedRef.current.user2.x = x2;
-      simulatedRef.current.user2.y = y2;
-
-      // Randomly spawn a click ripple for simulated collaborators
-      if (Math.random() < 0.008) {
-        const rippleId = Math.random().toString();
-        setClickRipples((prev) => [
-          ...prev.slice(-10),
-          { id: rippleId, x: x1, y: y1, color: simulatedRef.current.user1.color },
-        ]);
-        setTimeout(() => {
-          setClickRipples((prev) => prev.filter((r) => r.id !== rippleId));
-        }, 800);
-      }
-
-      animRef.current = requestAnimationFrame(updateSimulated);
-    };
-
-    animRef.current = requestAnimationFrame(updateSimulated);
-
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [enabled]);
+    return () => clearInterval(interval);
+  }, []);
 
   if (!enabled) return null;
 
-  // Combine real WebSocket users + simulated users if fewer than 2 real users
-  const realUsersList = Object.values(remoteUsers);
-  const displayUsers: RemoteUser[] =
-    realUsersList.length >= 2
-      ? realUsersList
-      : [
-          ...realUsersList,
-          simulatedRef.current.user1,
-          simulatedRef.current.user2,
-        ];
+  const displayUsers: RemoteUser[] = Object.values(remoteUsers);
 
   return (
     <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden select-none">
       {/* Click Ripples */}
-      {clickRipples.map((ripple) => (
+      {clickRipples.map((ripple: { id: string; x: number; y: number; color: string }) => (
         <div
           key={ripple.id}
           className="absolute rounded-full border-2 animate-ping pointer-events-none"
@@ -245,8 +194,8 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
         />
       ))}
 
-      {/* Collaborator Mouse Cursors */}
-      {displayUsers.map((user) => (
+      {/* Real-time active cursors */}
+      {displayUsers.map((user: RemoteUser) => (
         <div
           key={user.id}
           className="absolute transition-all duration-75 ease-out flex flex-col items-start"
@@ -275,7 +224,7 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
             className="mt-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-white shadow-lg flex items-center gap-1.5 backdrop-blur-md border border-white/20 whitespace-nowrap"
             style={{ backgroundColor: user.color }}
           >
-            <Radio className="w-2.5 h-2.5 animate-pulse" />
+            <Radio className="w-2.5 h-2.5 animate-pulse text-white" />
             <span>{user.name}</span>
             {user.activeTool && (
               <span className="opacity-80 font-normal border-l border-white/30 pl-1">

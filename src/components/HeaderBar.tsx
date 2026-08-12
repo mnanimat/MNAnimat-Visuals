@@ -23,6 +23,7 @@ import {
   MousePointer2,
   Save,
   Download,
+  FolderKanban,
 } from 'lucide-react';
 import { AppMode, CloudStorageConfig, Collaborator } from '../types';
 
@@ -34,6 +35,7 @@ interface HeaderBarProps {
   onOpenShortcutsModal: () => void;
   onOpenLayoutModal: () => void;
   onOpenExportModal?: () => void;
+  onOpenDashboard?: () => void;
   collaborators: Collaborator[];
   activeLayoutName: string;
   onUndo?: () => void;
@@ -73,6 +75,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenShortcutsModal,
   onOpenLayoutModal,
   onOpenExportModal,
+  onOpenDashboard,
   collaborators,
   activeLayoutName,
   onUndo,
@@ -155,6 +158,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             Micael Nildo
           </p>
         </div>
+
+        {/* Dashboard Navigation Button */}
+        {onOpenDashboard && (
+          <button
+            onClick={onOpenDashboard}
+            title="Ir para o Painel de Projetos"
+            className="ml-2 px-2.5 py-1.5 bg-slate-950 hover:bg-slate-800 text-xs font-extrabold text-indigo-300 hover:text-cyan-300 rounded-xl border border-slate-800 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow"
+          >
+            <FolderKanban className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden lg:inline">Meus Projetos</span>
+          </button>
+        )}
       </div>
 
       {/* Mode Switches with Drag & Drop Reordering */}
