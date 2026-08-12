@@ -23,8 +23,20 @@ const ALL_SHORTCUTS: ShortcutItem[] = [
   { key: '[  /  ]', description: 'Diminuir / Aumentar tamanho do pincel', category: 'Pintura' },
   { key: 'Shift + [  /  ]', description: 'Diminuir / Aumentar dureza do pincel', category: 'Pintura' },
   { key: '1 - 0', description: 'Ajustar opacidade do pincel de 10% a 100%', category: 'Pintura' },
-  { key: 'Ctrl + Shift + N', description: 'Criar Nova Camada', category: 'Pintura' },
+  { key: 'Shift + N / Ctrl + Shift + N', description: 'Criar Nova Camada', category: 'Pintura' },
+  { key: 'Ctrl + J / Shift + D', description: 'Duplicar Camada Ativa', category: 'Pintura' },
+  { key: 'Ctrl + G / Shift + G', description: 'Criar Novo Grupo / Agrupar Camadas', category: 'Pintura' },
+  { key: 'Shift + Delete / Ctrl + Shift + Del', description: 'Excluir Camada Ativa', category: 'Pintura' },
+  { key: 'Alt + M / Ctrl + Alt + M', description: 'Alternar Camada Máscara (Clipping Mask)', category: 'Pintura' },
   { key: 'Ctrl + E', description: 'Mesclar Camada Atual com a de Baixo', category: 'Pintura' },
+
+  // Animação 2D
+  { key: 'Espaço', description: 'Iniciar / Pausar Reprodução da Animação', category: 'Animação 2D' },
+  { key: ', / .', description: 'Quadro Anterior / Próximo Quadro (Frame por Frame)', category: 'Animação 2D' },
+  { key: 'Shift + N', description: 'Criar Nova Camada no Quadro Ativo', category: 'Animação 2D' },
+  { key: 'Ctrl + J / Shift + D', description: 'Duplicar Camada do Quadro', category: 'Animação 2D' },
+  { key: 'Ctrl + G / Shift + G', description: 'Agrupar Camadas da Animação', category: 'Animação 2D' },
+  { key: 'O', description: 'Alternar Papel Transparente (Onion Skinning)', category: 'Animação 2D' },
 
   // Vetores
   { key: 'V', description: 'Ferramenta de Seleção e Mover Nós', category: 'Vetores' },
@@ -64,7 +76,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
 
   if (!isOpen) return null;
 
-  const categories = ['Todas', 'Geral', 'Pintura', 'Vetores', '3D Render', 'Apresentação', 'Documentos', 'Vídeo'];
+  const categories = ['Todas', 'Geral', 'Pintura', 'Animação 2D', 'Vetores', '3D Render', 'Apresentação', 'Documentos', 'Vídeo'];
 
   const filtered = ALL_SHORTCUTS.filter((item) => {
     const matchesSearch =

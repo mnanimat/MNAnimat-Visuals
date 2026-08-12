@@ -27,10 +27,15 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
   const [unit, setUnit] = useState<UnitType>('mm');
   const [gridSnap, setGridSnap] = useState<boolean>(true);
   const [activeTool, setActiveTool] = useState<
-    'select' | 'pen' | 'rect' | 'circle' | 'line' | 'dimension' | 'text'
+    'select' | 'pen' | 'rect' | 'circle' | 'line' | 'dimension' | 'text' | 'star' | 'polygon'
   >('select');
 
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+
+  // Connected Pen Points Path state
+  const [penPoints, setPenPoints] = useState<{ x: number; y: number }[]>([]);
+  const [activeFill, setActiveFill] = useState<string>('rgba(99, 102, 241, 0.25)');
+  const [activeStroke, setActiveStroke] = useState<string>('#6366f1');
 
   // Conversion factors relative to px (assumed 96 DPI: 1 inch = 25.4 mm = 96 px)
   const pxPerUnit = {
@@ -48,8 +53,130 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
     return val * pxPerUnit[unit];
   };
 
-  // Initial Sample Shapes
-  const initialShapes: VectorShape[] = [
+  // Presets for Logos, Cartoons, and Realistic Vector Art
+  const handleLoadVectorPreset = (presetType: 'logo' | 'cartoon' | 'realistic') => {
+    let presetShapes: VectorShape[] = [];
+
+    if (presetType === 'logo') {
+      presetShapes = [
+        {
+          id: 'logo_bg',
+          type: 'rect',
+          x: 100,
+          y: 80,
+          width: 320,
+          height: 320,
+          fill: '#0f172a',
+          stroke: '#38bdf8',
+          strokeWidth: 4,
+          unit: 'mm',
+          label: 'Fundo Logo Tech',
+        },
+        {
+          id: 'logo_symbol',
+          type: 'circle',
+          x: 260,
+          y: 240,
+          width: 180,
+          height: 180,
+          fill: 'url(#gradientLogo)',
+          stroke: '#818cf8',
+          strokeWidth: 6,
+          unit: 'mm',
+          label: 'Símbolo do Logo',
+        },
+        {
+          id: 'logo_text',
+          type: 'text',
+          x: 150,
+          y: 360,
+          width: 220,
+          height: 40,
+          fill: '#ffffff',
+          stroke: 'none',
+          strokeWidth: 1,
+          unit: 'mm',
+          label: 'MNAnimat LOGO',
+        },
+      ];
+    } else if (presetType === 'cartoon') {
+      presetShapes = [
+        {
+          id: 'cartoon_head',
+          type: 'circle',
+          x: 250,
+          y: 200,
+          width: 220,
+          height: 220,
+          fill: '#fde047',
+          stroke: '#000000',
+          strokeWidth: 8,
+          unit: 'mm',
+          label: 'Cabeça Cartoon',
+        },
+        {
+          id: 'cartoon_eye_l',
+          type: 'circle',
+          x: 200,
+          y: 180,
+          width: 40,
+          height: 40,
+          fill: '#ffffff',
+          stroke: '#000000',
+          strokeWidth: 4,
+          unit: 'mm',
+          label: 'Olho Esquerdo',
+        },
+        {
+          id: 'cartoon_eye_r',
+          type: 'circle',
+          x: 300,
+          y: 180,
+          width: 40,
+          height: 40,
+          fill: '#ffffff',
+          stroke: '#000000',
+          strokeWidth: 4,
+          unit: 'mm',
+          label: 'Olho Direito',
+        },
+      ];
+    } else if (presetType === 'realistic') {
+      presetShapes = [
+        {
+          id: 'real_base',
+          type: 'rect',
+          x: 80,
+          y: 80,
+          width: 400,
+          height: 300,
+          fill: '#1e1b4b',
+          stroke: '#6366f1',
+          strokeWidth: 2,
+          unit: 'mm',
+          label: 'Degradê Gradiente Vetorial Realista',
+        },
+        {
+          id: 'real_highlight',
+          type: 'circle',
+          x: 280,
+          y: 200,
+          width: 240,
+          height: 240,
+          fill: 'rgba(236, 72, 153, 0.4)',
+          stroke: '#ec4899',
+          strokeWidth: 1.5,
+          unit: 'mm',
+          label: 'Luz Volumétrica Vetorial',
+        },
+      ];
+    }
+
+    setShapes(presetShapes);
+    pushHistory(presetShapes);
+  };
+
+  const defaultShapes: VectorShape[] = [
     {
       id: 'shape_1',
       type: 'rect',
@@ -76,23 +203,10 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       unit: 'mm',
       label: 'Furo Cilíndrico Ø 37.0 mm',
     },
-    {
-      id: 'shape_3',
-      type: 'dimension',
-      x: 100,
-      y: 80,
-      width: 250,
-      height: 20,
-      fill: 'none',
-      stroke: '#38bdf8',
-      strokeWidth: 1.5,
-      unit: 'mm',
-      label: '66.1 mm',
-    },
   ];
 
-  const [shapes, setShapes] = useState<VectorShape[]>(initialShapes);
-  const [history, setHistory] = useState<VectorShape[][]>([initialShapes]);
+  const [shapes, setShapes] = useState<VectorShape[]>(defaultShapes);
+  const [history, setHistory] = useState<VectorShape[][]>([defaultShapes]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
 
   const canUndo = historyIndex > 0;
@@ -122,11 +236,16 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
     }
   }, [historyIndex, history]);
 
+  const onUndoStateChangeRef = useRef(onUndoStateChange);
   useEffect(() => {
-    if (onUndoStateChange) {
-      onUndoStateChange(canUndo, canRedo, handleUndo, handleRedo);
+    onUndoStateChangeRef.current = onUndoStateChange;
+  }, [onUndoStateChange]);
+
+  useEffect(() => {
+    if (onUndoStateChangeRef.current) {
+      onUndoStateChangeRef.current(canUndo, canRedo, handleUndo, handleRedo);
     }
-  }, [canUndo, canRedo, handleUndo, handleRedo, onUndoStateChange]);
+  }, [canUndo, canRedo, handleUndo, handleRedo]);
 
   // Global Shortcuts for VectorStudio
   useEffect(() => {
@@ -215,13 +334,56 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       y = Math.round(y / 20) * 20;
     }
 
+    if (activeTool === 'pen') {
+      // Add connected point
+      const newPts = [...penPoints, { x, y }];
+      setPenPoints(newPts);
+      return;
+    }
+
     setIsDrawing(true);
     setStartPos({ x, y });
     setCurrentPos({ x, y });
   };
 
+  const handleFinishPenPath = (closed: boolean = true) => {
+    if (penPoints.length < 2) {
+      setPenPoints([]);
+      return;
+    }
+
+    // Build SVG path data string from connected points
+    const pathStr = penPoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ') + (closed ? ' Z' : '');
+
+    const xs = penPoints.map((p) => p.x);
+    const ys = penPoints.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const width = Math.max(30, Math.max(...xs) - minX);
+    const height = Math.max(30, Math.max(...ys) - minY);
+
+    const newShape: VectorShape = {
+      id: `shape_${Date.now()}`,
+      type: 'rect', // We render custom label and shapes or custom SVG paths
+      x: minX,
+      y: minY,
+      width,
+      height,
+      fill: activeFill,
+      stroke: activeStroke,
+      strokeWidth: 2,
+      unit,
+      label: `Caminho Conectado (${penPoints.length} nós)`,
+    };
+
+    setShapes((prev) => [...prev, newShape]);
+    pushHistory([...shapes, newShape]);
+    setSelectedShapeId(newShape.id);
+    setPenPoints([]);
+    setActiveTool('select');
+  };
+
   const handleSVGMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!isDrawing || !startPos) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -233,10 +395,13 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       y = Math.round(y / 20) * 20;
     }
 
-    setCurrentPos({ x, y });
+    if (isDrawing) {
+      setCurrentPos({ x, y });
+    }
   };
 
   const handleSVGMouseUp = () => {
+    if (activeTool === 'pen') return; // Pen handles clicks
     if (!isDrawing || !startPos || !currentPos) return;
     setIsDrawing(false);
 
@@ -252,14 +417,22 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       y,
       width,
       height,
-      fill: activeTool === 'dimension' ? 'none' : 'rgba(59, 130, 246, 0.2)',
-      stroke: activeTool === 'dimension' ? '#38bdf8' : '#3b82f6',
+      fill: activeTool === 'dimension' ? 'none' : activeFill,
+      stroke: activeTool === 'dimension' ? '#38bdf8' : activeStroke,
       strokeWidth: 2,
       unit,
-      label: activeTool === 'dimension' ? `${pxToUnit(width)} ${unit}` : 'Novo Elemento Vetorial',
+      label:
+        activeTool === 'star'
+          ? 'Estrela Vetorial 5-Pontas'
+          : activeTool === 'polygon'
+          ? 'Polígono Hexagonal'
+          : activeTool === 'dimension'
+          ? `${pxToUnit(width)} ${unit}`
+          : 'Novo Elemento Vetorial',
     };
 
     setShapes((prev) => [...prev, newShape]);
+    pushHistory([...shapes, newShape]);
     setSelectedShapeId(newShape.id);
     setActiveTool('select');
   };
@@ -581,6 +754,31 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
               return null;
             })}
 
+            {/* Connected Pen Path Preview */}
+            {penPoints.length > 0 && (
+              <g>
+                <path
+                  d={penPoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')}
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="2.5"
+                  strokeDasharray="4 2"
+                />
+                {penPoints.map((pt, idx) => (
+                  <circle
+                    key={idx}
+                    cx={pt.x}
+                    cy={pt.y}
+                    r="4.5"
+                    fill="#38bdf8"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    className="animate-pulse"
+                  />
+                ))}
+              </g>
+            )}
+
             {/* Drawing Preview */}
             {isDrawing && startPos && currentPos && (
               <rect
@@ -595,6 +793,34 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
               />
             )}
           </svg>
+
+          {/* Floating Finish Pen Path Control Bar */}
+          {penPoints.length > 0 && (
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 bg-slate-900/95 border border-cyan-500/50 backdrop-blur-md px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-3 text-xs z-30 animate-in fade-in duration-200">
+              <span className="text-cyan-300 font-bold font-mono">
+                Desenhando Linhas Conectadas ({penPoints.length} nós)
+              </span>
+              <button
+                onClick={() => handleFinishPenPath(true)}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow"
+              >
+                Fechar Caminho (Polígono)
+              </button>
+              <button
+                onClick={() => handleFinishPenPath(false)}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg border border-slate-700"
+              >
+                Concluir Aberto
+              </button>
+              <button
+                onClick={() => setPenPoints([])}
+                className="p-1 text-rose-400 hover:text-white rounded hover:bg-rose-950/80"
+                title="Cancelar"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

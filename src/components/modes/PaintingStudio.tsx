@@ -23,9 +23,12 @@ import {
   Redo2,
   Check,
   HelpCircle,
+  Edit2,
+  Scissors,
 } from 'lucide-react';
-import { BrushConfig, BrushCategory, BrushType } from '../../types';
+import { BrushConfig, BrushCategory, BrushType, CloudStorageConfig } from '../../types';
 import { drawBrushStroke, Point } from '../../utils/brushEngine';
+import { HighResExportModal } from '../HighResExportModal';
 
 interface InternalLayer {
   id: string;
@@ -34,6 +37,7 @@ interface InternalLayer {
   locked: boolean;
   opacity: number;
   blendMode: GlobalCompositeOperation;
+  isMask?: boolean;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
 }
@@ -45,6 +49,7 @@ interface LayerSnapshot {
   locked: boolean;
   opacity: number;
   blendMode: GlobalCompositeOperation;
+  isMask?: boolean;
   imageData: ImageData;
 }
 
@@ -57,6 +62,7 @@ interface FullHistoryItem {
 
 export interface PaintingStudioProps {
   onUndoStateChange?: (canUndo: boolean, canRedo: boolean, undoFn: () => void, redoFn: () => void) => void;
+  cloudConfig?: CloudStorageConfig;
 }
 
 export interface BrushCategoryDef {
@@ -92,6 +98,64 @@ export interface BrushPresetItem {
 }
 
 export const ALL_BRUSH_PRESETS: BrushPresetItem[] = [
+  // NOVOS PINCÉIS ESPECIALIZADOS PARA PERSONAGENS & JOGOS AAA
+  {
+    type: 'skin_pores',
+    category: 'pele',
+    name: 'Íris & Brilho Ocular AAA',
+    icon: '👁️',
+    description: 'Pincel radial de detalhe fino para retratação de íris humana e ponto de luz ocular',
+    defaultSize: 22,
+    defaultOpacity: 0.95,
+    defaultFlow: 0.9,
+    defaultScatter: 0.0,
+    defaultGrain: 0.1,
+    usePressureSize: true,
+    usePressureOpacity: true,
+  },
+  {
+    type: 'skin_pores',
+    category: 'pele',
+    name: 'Rugas & Marcadores de Expressão',
+    icon: '✏️',
+    description: 'Traço afunilado anatômico para sulcos de expressão facial, testa e lábios',
+    defaultSize: 18,
+    defaultOpacity: 0.85,
+    defaultFlow: 0.8,
+    defaultScatter: 0.0,
+    defaultGrain: 0.2,
+    usePressureSize: true,
+    usePressureOpacity: true,
+  },
+  {
+    type: 'skin_pores',
+    category: 'pele',
+    name: 'Tinta de Guerra & Tatuagens',
+    icon: '🎨',
+    description: 'Pincel texturizado de alta densidade para marcas tribais e pinturas faciais de jogos',
+    defaultSize: 34,
+    defaultOpacity: 0.9,
+    defaultFlow: 0.85,
+    defaultScatter: 0.1,
+    defaultGrain: 0.5,
+    usePressureSize: true,
+    usePressureOpacity: true,
+  },
+  {
+    type: 'skin_subsurface',
+    category: 'pele',
+    name: 'Subcutâneo & Vascularização',
+    icon: '🩸',
+    description: 'Micro-veias sutis e tons avermelhados subcutâneos para derme hiper-realista',
+    defaultSize: 26,
+    defaultOpacity: 0.4,
+    defaultFlow: 0.5,
+    defaultScatter: 0.05,
+    defaultGrain: 0.3,
+    usePressureSize: true,
+    usePressureOpacity: true,
+  },
+
   // METAL
   {
     type: 'metal_sheen',
@@ -529,9 +593,12 @@ export const ALL_BRUSH_PRESETS: BrushPresetItem[] = [
   },
 ];
 
-export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChange }) => {
+export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChange, cloudConfig }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // High Resolution Export Modal State
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
   // Active Category Filter
   const [activeCategory, setActiveCategory] = useState<BrushCategory>('metal');
@@ -539,6 +606,8 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
   // Layers State
   const [layers, setLayers] = useState<InternalLayer[]>([]);
   const [activeLayerId, setActiveLayerId] = useState<string>('');
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
+  const [editingLayerName, setEditingLayerName] = useState<string>('');
 
   // History State with Canvas Pixel Snapshots
   const [fullHistory, setFullHistory] = useState<FullHistoryItem[]>([]);
@@ -563,6 +632,83 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
 
   // Tool Modes: 'brush' | 'eraser' | 'pipette'
   const [activeTool, setActiveTool] = useState<'brush' | 'eraser' | 'pipette'>('brush');
+
+  // Gemini AI Face Painting & Timelapse Video State
+  const [showAiModal, setShowAiModal] = useState<boolean>(false);
+  const [aiCharacterType, setAiCharacterType] = useState<string>('Guerreiro Humano Nordico com Armadura');
+  const [aiStyle, setAiStyle] = useState<string>('Ultra-realista AAA PBR Render Engine');
+  const [aiExpression, setAiExpression] = useState<string>('Expressão Feroz de Batalha');
+  const [aiCustomPrompt, setAiCustomPrompt] = useState<string>('');
+  const [isGeneratingAi, setIsGeneratingAi] = useState<boolean>(false);
+  const [aiProgressStep, setAiProgressStep] = useState<number>(0);
+  const [aiStatusMsg, setAiStatusMsg] = useState<string>('');
+  const [generatedAiImage, setGeneratedAiImage] = useState<string | null>(null);
+
+  // Gemini AI Painting Generator & Video Simulator Handler
+  const handleGenerateAiCharacterPainting = async () => {
+    setIsGeneratingAi(true);
+    setAiProgressStep(1);
+    setAiStatusMsg('Enviando requisição ao Gemini AI Server...');
+
+    try {
+      const fullPrompt =
+        aiCustomPrompt ||
+        `High detail realistic AAA video game character portrait face, ${aiCharacterType}, ${aiStyle}, ${aiExpression}, sub-surface scattering skin, 8k render, ArtStation spotlight`;
+
+      const res = await fetch('/api/gemini/generate-painting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          characterType: aiCharacterType,
+          style: aiStyle,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success || !data.imageUrl) {
+        throw new Error(data.error || 'Falha ao gerar imagem com Gemini');
+      }
+
+      setGeneratedAiImage(data.imageUrl);
+
+      // Start 4-step AI Video Timelapse simulation
+      setAiProgressStep(2);
+      setAiStatusMsg('Etapa 1/4: IA desenhando lineart anatômica com Pincel Lápis Grafite 2B...');
+      await new Promise((r) => setTimeout(r, 1200));
+
+      setAiProgressStep(3);
+      setAiStatusMsg('Etapa 2/4: Aplicando massas de cor de pele e Subsurface Scattering (SSS)...');
+      await new Promise((r) => setTimeout(r, 1200));
+
+      setAiProgressStep(4);
+      setAiStatusMsg('Etapa 3/4: Pincelando textura de Poros da Derme, rugas e brilho na íris...');
+      await new Promise((r) => setTimeout(r, 1200));
+
+      setAiProgressStep(5);
+      setAiStatusMsg('Etapa 4/4: Finalizando pintura digital realista AAA!');
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Draw the generated image onto the active canvas layer!
+      const activeLayer = layersRef.current.find((l) => l.id === activeLayerId) || layersRef.current[0];
+      if (activeLayer) {
+        const img = new Image();
+        img.onload = () => {
+          activeLayer.ctx.drawImage(img, 0, 0, activeLayer.canvas.width, activeLayer.canvas.height);
+          renderComposite();
+          recordHistory('Pintura IA Gemini (Rosto de Personagem)');
+          showToast('Pintura digital realista gerada com sucesso pelo Gemini AI!');
+        };
+        img.src = data.imageUrl;
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || 'Erro ao comunicar com Gemini AI');
+    } finally {
+      setIsGeneratingAi(false);
+      setAiProgressStep(0);
+    }
+  };
 
   // Stylus Pressure State
   const [currentPressure, setCurrentPressure] = useState<number>(0);
@@ -625,6 +771,7 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
         locked: layer.locked,
         opacity: layer.opacity,
         blendMode: layer.blendMode,
+        isMask: layer.isMask,
         imageData: new ImageData(new Uint8ClampedArray(imgData.data), width, height),
       };
     });
@@ -667,6 +814,7 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
         locked: snap.locked,
         opacity: snap.opacity,
         blendMode: snap.blendMode,
+        isMask: snap.isMask,
         canvas: layerCanvas,
         ctx: layerCtx,
       };
@@ -692,11 +840,16 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
   }, [restoreSnapshot]);
 
   // Report Undo/Redo state up to HeaderBar
+  const onUndoStateChangeRef = useRef(onUndoStateChange);
   useEffect(() => {
-    if (onUndoStateChange) {
-      onUndoStateChange(canUndo, canRedo, handleUndo, handleRedo);
+    onUndoStateChangeRef.current = onUndoStateChange;
+  }, [onUndoStateChange]);
+
+  useEffect(() => {
+    if (onUndoStateChangeRef.current) {
+      onUndoStateChangeRef.current(canUndo, canRedo, handleUndo, handleRedo);
     }
-  }, [canUndo, canRedo, handleUndo, handleRedo, onUndoStateChange]);
+  }, [canUndo, canRedo, handleUndo, handleRedo]);
 
   // Toast notification state for shortcut visual feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -765,6 +918,19 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
       } else if (e.key.toLowerCase() === 'i') {
         setActiveTool('pipette');
         showToast('Ferramenta: Conta-gotas (I)');
+      } else if ((isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 'n') || (e.shiftKey && e.key.toLowerCase() === 'n')) {
+        e.preventDefault();
+        addLayer();
+        showToast('Nova Camada Criada (Shift+N)');
+      } else if ((isCtrlOrCmd && e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace')) || (e.shiftKey && e.key === 'Delete')) {
+        e.preventDefault();
+        deleteActiveLayer();
+        showToast('Camada Ativa Excluída');
+      } else if ((isCtrlOrCmd && e.altKey && e.key.toLowerCase() === 'm') || (e.altKey && e.key.toLowerCase() === 'm')) {
+        e.preventDefault();
+        if (activeLayerId) {
+          toggleLayerMask(activeLayerId);
+        }
       }
     };
 
@@ -818,7 +984,14 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
 
       ctx.save();
       ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = layer.blendMode;
+
+      if (layer.isMask && i > 0) {
+        // Clipping Mask / Camada Máscara: Constrains drawing to non-transparent alpha of layer below
+        ctx.globalCompositeOperation = 'source-atop';
+      } else {
+        ctx.globalCompositeOperation = layer.blendMode;
+      }
+
       ctx.drawImage(layer.canvas, 0, 0);
       ctx.restore();
     }
@@ -975,10 +1148,40 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
     );
   };
 
+  const startEditingLayerName = (id: string, currentName: string) => {
+    setEditingLayerId(id);
+    setEditingLayerName(currentName);
+  };
+
+  const saveEditingLayerName = (id: string) => {
+    const trimmed = editingLayerName.trim();
+    if (trimmed) {
+      setLayers((prev) =>
+        prev.map((l) => (l.id === id ? { ...l, name: trimmed } : l))
+      );
+      recordHistory(`Renomear Camada (${trimmed})`);
+    }
+    setEditingLayerId(null);
+  };
+
   const toggleLayerLock = (id: string) => {
     setLayers((prev) =>
       prev.map((l) => (l.id === id ? { ...l, locked: !l.locked } : l))
     );
+  };
+
+  const toggleLayerMask = (id: string) => {
+    setLayers((prev) =>
+      prev.map((l) => {
+        if (l.id === id) {
+          const nextMask = !l.isMask;
+          showToast(nextMask ? 'Máscara de Recorte Ativada' : 'Máscara de Recorte Desativada');
+          return { ...l, isMask: nextMask };
+        }
+        return l;
+      })
+    );
+    recordHistory('Alternar Camada Máscara');
   };
 
   const setLayerOpacity = (id: string, opacity: number) => {
@@ -1248,11 +1451,12 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
               </button>
 
               <button
-                onClick={exportCanvasImage}
-                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded shadow transition-all"
+                onClick={() => setIsExportModalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1 bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white text-xs font-bold rounded shadow-lg shadow-indigo-600/25 transition-all cursor-pointer ring-1 ring-white/20"
+                title="Exportar em Alta Resolução (PNG, JPEG, TIFF, Google Drive, R2)"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Exportar PNG</span>
+                <span>Exportar HD</span>
               </button>
             </div>
           </div>
@@ -1456,14 +1660,15 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
             <div className="flex items-center gap-1">
               <button
                 onClick={addLayer}
-                title="Nova Camada"
-                className="p-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition-colors"
+                title="Nova Camada (Atalho: Shift + N)"
+                className="p-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded shadow transition-colors flex items-center gap-1 text-[10px] font-semibold"
               >
                 <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Shift+N</span>
               </button>
               <button
                 onClick={deleteActiveLayer}
-                title="Excluir Camada Ativa"
+                title="Excluir Camada Ativa (Atalho: Shift + Delete)"
                 className="p-1.5 bg-[#222222] hover:bg-rose-950 hover:text-rose-400 text-gray-400 rounded transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -1486,14 +1691,75 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
-                      {layer.name}
-                      {isActive && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                      )}
-                    </span>
+                    {editingLayerId === layer.id ? (
+                      <div className="flex items-center gap-1 flex-1 mr-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editingLayerName}
+                          onChange={(e) => setEditingLayerName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              saveEditingLayerName(layer.id);
+                            } else if (e.key === 'Escape') {
+                              setEditingLayerId(null);
+                            }
+                          }}
+                          onBlur={() => saveEditingLayerName(layer.id)}
+                          autoFocus
+                          className="bg-slate-900 border border-indigo-500 rounded px-1.5 py-0.5 text-xs text-white font-semibold focus:outline-none w-full"
+                        />
+                        <button
+                          onClick={() => saveEditingLayerName(layer.id)}
+                          className="p-1 text-emerald-400 hover:text-emerald-300"
+                          title="Salvar Nome da Camada"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="flex items-center gap-1.5 flex-1 min-w-0 mr-2 group/layername"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          startEditingLayerName(layer.id, layer.name);
+                        }}
+                      >
+                        <span className="text-xs font-semibold text-gray-200 truncate" title="Clique duas vezes para editar o nome da camada">
+                          {layer.name}
+                        </span>
+                        {layer.isMask && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800 font-bold shrink-0">
+                            Máscara
+                          </span>
+                        )}
+                        {isActive && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingLayerName(layer.id, layer.name);
+                          }}
+                          className="opacity-0 group-hover/layername:opacity-100 transition-opacity p-0.5 text-gray-400 hover:text-indigo-300"
+                          title="Editar Nome da Camada"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleLayerMask(layer.id);
+                        }}
+                        title={layer.isMask ? "Remover Máscara de Recorte (Alt+M)" : "Ativar Máscara de Recorte (Alt+M)"}
+                        className={`p-1 transition-colors ${layer.isMask ? 'text-purple-400 bg-purple-950/60 rounded' : 'text-gray-500 hover:text-purple-300'}`}
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                      </button>
+
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1524,7 +1790,7 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
                     </div>
                   </div>
 
-                  {/* Blend Mode & Opacity */}
+                  {/* Blend Mode & Opacity & Mask option */}
                   {isActive && (
                     <div className="flex flex-col gap-2 pt-1.5 border-t border-white/10">
                       <div className="flex items-center justify-between text-[11px]">
@@ -1546,6 +1812,23 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
                           <option value="color-burn">Color Burn</option>
                           <option value="difference">Diferença</option>
                         </select>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-400 flex items-center gap-1">
+                          <Scissors className="w-3 h-3 text-purple-400" />
+                          Máscara de Recorte:
+                        </span>
+                        <button
+                          onClick={() => toggleLayerMask(layer.id)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                            layer.isMask
+                              ? 'bg-purple-600 text-white shadow'
+                              : 'bg-white/10 text-gray-400 hover:bg-white/20'
+                          }`}
+                        >
+                          {layer.isMask ? 'ATIVADA' : 'DESATIVADA'}
+                        </button>
                       </div>
 
                       <div className="flex items-center gap-2 text-[11px]">
@@ -1641,6 +1924,24 @@ export const PaintingStudio: React.FC<PaintingStudioProps> = ({ onUndoStateChang
           </div>
         </div>
       </aside>
+
+      {/* High Resolution Export Options Modal (PNG, JPEG, TIFF, Drive, R2) */}
+      <HighResExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        layers={layers.map((l) => ({
+          id: l.id,
+          name: l.name,
+          visible: l.visible,
+          opacity: l.opacity,
+          blendMode: l.blendMode,
+          canvas: l.canvas,
+        }))}
+        canvasWidth={1200}
+        canvasHeight={800}
+        cloudConfig={cloudConfig || { provider: 'google_drive', connected: false, autoSync: true }}
+        onShowToast={showToast}
+      />
     </div>
   );
 };

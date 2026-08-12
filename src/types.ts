@@ -1,4 +1,26 @@
-export type AppMode = 'painting' | 'vector' | '3d_render' | 'presentation' | 'document' | 'video';
+export type AppMode =
+  | 'painting'
+  | 'vector'
+  | '3d_render'
+  | 'animation2d'
+  | 'image_editor'
+  | 'presentation'
+  | 'document'
+  | 'spreadsheet'
+  | 'video';
+
+export interface FloatingWindow {
+  id: string;
+  title: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMinimized: boolean;
+  isMaximized: boolean;
+  zIndex: number;
+  content: 'tools' | 'layers' | 'color_picker' | 'inspector' | 'timeline' | 'preview';
+}
 
 export type UnitType = 'px' | 'mm' | 'cm' | 'in';
 
@@ -105,7 +127,7 @@ export interface VectorShape {
 
 export interface SlideElement {
   id: string;
-  type: 'text' | 'image' | 'shape';
+  type: 'text' | 'image' | 'shape' | 'video';
   content: string;
   x: number;
   y: number;
@@ -142,17 +164,53 @@ export interface VideoTrack {
   clips: VideoClip[];
 }
 
+export interface SceneLight {
+  id: string;
+  name: string;
+  type: 'ambient' | 'directional' | 'point' | 'spot';
+  color: string;
+  intensity: number;
+  position: [number, number, number];
+  enabled: boolean;
+  castShadow?: boolean;
+  distance?: number;
+  decay?: number;
+  angle?: number;
+  penumbra?: number;
+}
+
 export interface ThreeObject {
   id: string;
   name: string;
-  type: 'cube' | 'sphere' | 'cylinder' | 'torus' | 'plane' | 'light_dir' | 'light_point';
+  type:
+    | 'cube'
+    | 'sphere'
+    | 'cylinder'
+    | 'torus'
+    | 'plane'
+    | 'cone'
+    | 'pyramid'
+    | 'character_dummy'
+    | 'character_head'
+    | 'helmet'
+    | 'tree'
+    | 'rock'
+    | 'pillar'
+    | 'chest'
+    | 'wall'
+    | 'light_dir'
+    | 'light_point';
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
   color: string;
   roughness: number;
   metalness: number;
+  emissive?: string;
+  emissiveIntensity?: number;
   wireframe: boolean;
+  category?: 'basicos' | 'personagem' | 'cenario';
+  visible?: boolean;
 }
 
 export interface CloudStorageConfig {
@@ -179,5 +237,31 @@ export interface Collaborator {
 export interface ShortcutItem {
   key: string;
   description: string;
-  category: 'Geral' | 'Pintura' | 'Vetores' | '3D Render' | 'Apresentação' | 'Documentos' | 'Vídeo';
+  category: 'Geral' | 'Pintura' | 'Vetores' | '3D Render' | 'Animação 2D' | 'Imagem' | 'Apresentação' | 'Documentos' | 'Vídeo' | 'Planilhas';
 }
+
+export interface SpreadsheetCell {
+  raw: string;
+  formatted?: string;
+  computed?: string | number;
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  bg?: string;
+  color?: string;
+  format?: 'text' | 'currency' | 'percent' | 'number';
+}
+
+export interface SpreadsheetData {
+  [cellId: string]: SpreadsheetCell; // e.g., 'A1', 'B2'
+}
+
+export interface DashboardChartConfig {
+  id: string;
+  title: string;
+  type: 'bar' | 'line' | 'pie' | 'area';
+  dataKeyX: string;
+  dataKeyY: string;
+  data: Array<Record<string, string | number>>;
+}
+

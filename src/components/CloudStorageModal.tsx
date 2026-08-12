@@ -11,9 +11,25 @@ import {
   Server,
   UploadCloud,
   Database,
+  History,
+  RotateCcw,
+  Sparkles,
+  Clock,
+  FileCode,
+  Plus,
 } from 'lucide-react';
 import { CloudStorageConfig } from '../types';
 import { getLocalProjects, saveCloudConfig, SavedProject } from '../utils/cloudSync';
+
+export interface VersionSnapshot {
+  id: string;
+  version: string;
+  timestamp: string;
+  sizeKb: number;
+  changesDescription: string;
+  author: string;
+  isCurrent?: boolean;
+}
 
 interface CloudStorageModalProps {
   isOpen: boolean;
@@ -36,6 +52,28 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [projects, setProjects] = useState<SavedProject[]>(getLocalProjects());
   const [syncLog, setSyncLog] = useState<string[]>([]);
+
+  // Version History state
+  const [selectedProjectForHistory, setSelectedProjectForHistory] = useState<SavedProject | null>(null);
+  const [versionHistories, setVersionHistories] = useState<Record<string, VersionSnapshot[]>>({
+    proj_1: [
+      { id: 'v1_3', version: 'v1.3', timestamp: 'Hoje às 14:30', sizeKb: 14200, changesDescription: 'Renderização 3D finalizada com sombras direcionais', author: 'mnanimat@gmail.com', isCurrent: true },
+      { id: 'v1_2', version: 'v1.2', timestamp: 'Ontem às 18:15', sizeKb: 12800, changesDescription: 'Ajuste no mapa de texturas PBR e iluminação HDRI', author: 'mnanimat@gmail.com' },
+      { id: 'v1_1', version: 'v1.1', timestamp: '04/08/2026 às 11:00', sizeKb: 9400, changesDescription: 'Malha tridimensional base importada', author: 'mnanimat@gmail.com' },
+      { id: 'v1_0', version: 'v1.0', timestamp: '01/08/2026 às 09:00', sizeKb: 4200, changesDescription: 'Criação inicial do projeto na nuvem', author: 'mnanimat@gmail.com' },
+    ],
+    proj_2: [
+      { id: 'v2_2', version: 'v2.0', timestamp: 'Hoje às 10:10', sizeKb: 8500, changesDescription: 'Inclusão de animações com Onion Skinning', author: 'mnanimat@gmail.com', isCurrent: true },
+      { id: 'v2_1', version: 'v2.1_beta', timestamp: '03/08/2026 às 16:40', sizeKb: 6100, changesDescription: 'Esboço vetorial da sequência de personagens', author: 'mnanimat@gmail.com' },
+    ],
+  });
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
 
   if (!isOpen) return null;
 
@@ -61,7 +99,8 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
         `[${new Date().toLocaleTimeString()}] Sincronização direta com Google Drive estabelecida!`,
         ...prev,
       ]);
-    }, 1200);
+      showToast('Google Drive conectado com sucesso!');
+    }, 1000);
   };
 
   const handleConnectR2 = () => {
@@ -87,7 +126,8 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
         `[${new Date().toLocaleTimeString()}] Conexão de alto desempenho Cloudflare R2 ativada!`,
         ...prev,
       ]);
-    }, 1200);
+      showToast('Cloudflare R2 conectado com sucesso!');
+    }, 1000);
   };
 
   const handleManualSyncProject = (projId: string) => {
@@ -108,6 +148,49 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
       `[${new Date().toLocaleTimeString()}] Projeto ${projId} enviado para a nuvem com redundância.`,
       ...prev,
     ]);
+    showToast('Projeto sincronizado na nuvem!');
+  };
+
+  const handleRestoreVersion = (projId: string, snapshot: VersionSnapshot) => {
+    setVersionHistories((prev) => {
+      const currentList = prev[projId] || [];
+      const updatedList = currentList.map((v) => ({
+        ...v,
+        isCurrent: v.id === snapshot.id,
+      }));
+      return { ...prev, [projId]: updatedList };
+    });
+
+    setSyncLog((prev) => [
+      `[${new Date().toLocaleTimeString()}] RESTAURAÇÃO: Snapshot ${snapshot.version} (${snapshot.timestamp}) restaurado com sucesso.`,
+      ...prev,
+    ]);
+
+    showToast(`Versão ${snapshot.version} restaurada com sucesso!`);
+  };
+
+  const handleCreateNewSnapshot = (projId: string) => {
+    const currentList = versionHistories[projId] || [];
+    const newVerNumber = `v1.${currentList.length + 1}`;
+    const newSnapshot: VersionSnapshot = {
+      id: `v_${Date.now()}`,
+      version: newVerNumber,
+      timestamp: 'Agora mesmo',
+      sizeKb: 15400,
+      changesDescription: 'Nova versão manual do projeto salva na nuvem',
+      author: userEmail || 'mnanimat@gmail.com',
+      isCurrent: true,
+    };
+
+    const updatedList = [newSnapshot, ...currentList.map((v) => ({ ...v, isCurrent: false }))];
+    setVersionHistories((prev) => ({ ...prev, [projId]: updatedList }));
+
+    setSyncLog((prev) => [
+      `[${new Date().toLocaleTimeString()}] NOVO SNAPSHOT: Criada versão ${newVerNumber} e registrada no histórico da nuvem.`,
+      ...prev,
+    ]);
+
+    showToast(`Novo snapshot ${newVerNumber} criado na nuvem!`);
   };
 
   return (
@@ -315,6 +398,15 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedProjectForHistory(proj)}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-all"
+                      title="Ver Histórico de Versões e Snapshots"
+                    >
+                      <History className="w-3 h-3 text-cyan-400" />
+                      Histórico ({versionHistories[proj.id]?.length || 1})
+                    </button>
+
                     {proj.syncedToCloud ? (
                       <span className="px-2.5 py-1 bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 rounded-full text-[10px] font-medium flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-400" />
@@ -362,6 +454,125 @@ export const CloudStorageModal: React.FC<CloudStorageModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Version History Modal Overlay */}
+      {selectedProjectForHistory && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[85vh]">
+            <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-cyan-500/10 rounded-xl text-cyan-400 border border-cyan-500/30">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Histórico de Versões na Nuvem
+                  </h3>
+                  <p className="text-xs text-cyan-400 font-semibold truncate max-w-sm">
+                    {selectedProjectForHistory.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedProjectForHistory(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">
+                  Snapshots salvos automaticamente na nuvem:
+                </span>
+                <button
+                  onClick={() => handleCreateNewSnapshot(selectedProjectForHistory.id)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Criar Novo Snapshot
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {(versionHistories[selectedProjectForHistory.id] || [
+                  {
+                    id: 'v1_0',
+                    version: 'v1.0',
+                    timestamp: 'Versão Inicial',
+                    sizeKb: selectedProjectForHistory.sizeKb,
+                    changesDescription: 'Sincronização inicial efetuada',
+                    author: 'mnanimat@gmail.com',
+                    isCurrent: true,
+                  },
+                ]).map((snapshot) => (
+                  <div
+                    key={snapshot.id}
+                    className={`p-4 rounded-xl border transition-all ${
+                      snapshot.isCurrent
+                        ? 'bg-indigo-950/40 border-indigo-500/80 shadow-lg shadow-indigo-900/20'
+                        : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">
+                          {snapshot.version}
+                        </span>
+                        {snapshot.isCurrent && (
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Atual
+                          </span>
+                        )}
+                        <span className="text-xs font-mono text-slate-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-500" /> {snapshot.timestamp}
+                        </span>
+                      </div>
+
+                      {!snapshot.isCurrent && (
+                        <button
+                          onClick={() => handleRestoreVersion(selectedProjectForHistory.id, snapshot)}
+                          className="px-3 py-1 bg-slate-800 hover:bg-indigo-600 text-slate-200 hover:text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                          Restaurar Versão
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-200 font-medium mb-2">
+                      {snapshot.changesDescription}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-slate-800/80 pt-2 font-mono">
+                      <span>Autor: {snapshot.author}</span>
+                      <span>Tamanho: {(snapshot.sizeKb / 1024).toFixed(2)} MB</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-6 py-3 bg-slate-950 border-t border-slate-800 flex items-center justify-end">
+              <button
+                onClick={() => setSelectedProjectForHistory(null)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold"
+              >
+                Voltar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-cyan-500/50 text-cyan-300 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 text-xs font-bold animate-in slide-in-from-bottom duration-300">
+          <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };
