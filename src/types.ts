@@ -119,7 +119,15 @@ export interface VectorShape {
   fill: string;
   stroke: string;
   strokeWidth: number;
-  points?: { x: number; y: number }[];
+  points?: {
+    x: number;
+    y: number;
+    curveType?: 'linear' | 'bezier';
+    cp1x?: number;
+    cp1y?: number;
+    cp2x?: number;
+    cp2y?: number;
+  }[];
   text?: string;
   unit: UnitType;
   label?: string;

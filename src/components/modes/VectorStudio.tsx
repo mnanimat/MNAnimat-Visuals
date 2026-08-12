@@ -33,9 +33,33 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
 
   // Connected Pen Points Path state
-  const [penPoints, setPenPoints] = useState<{ x: number; y: number }[]>([]);
+  const [penPoints, setPenPoints] = useState<{
+    x: number;
+    y: number;
+    curveType?: 'linear' | 'bezier';
+    cp1x?: number;
+    cp1y?: number;
+  }[]>([]);
+  
+  const [draggingPenPointIndex, setDraggingPenPointIndex] = useState<number | null>(null);
+  const [isDraggingHandle, setIsDraggingHandle] = useState<boolean>(false);
+
   const [activeFill, setActiveFill] = useState<string>('rgba(99, 102, 241, 0.25)');
   const [activeStroke, setActiveStroke] = useState<string>('#6366f1');
+
+  // Node editing state
+  const [draggedNode, setDraggedNode] = useState<{
+    shapeId: string;
+    nodeIndex: number;
+    type: 'anchor' | 'cp1';
+  } | null>(null);
+
+  // Shape dragging state
+  const [draggedShapeId, setDraggedShapeId] = useState<string | null>(null);
+  const [lastDragPos, setLastDragPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Selected node index inside pen shapes for inspector editing
+  const [selectedNodeIndex, setSelectedNodeIndex] = useState<number | null>(null);
 
   // Conversion factors relative to px (assumed 96 DPI: 1 inch = 25.4 mm = 96 px)
   const pxPerUnit = {
@@ -292,10 +316,22 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedShapeId) {
           e.preventDefault();
-          const nextShapes = shapes.filter((s) => s.id !== selectedShapeId);
-          setShapes(nextShapes);
-          setSelectedShapeId(null);
-          pushHistory(nextShapes);
+          const targetShape = shapes.find(s => s.id === selectedShapeId);
+          if (targetShape && targetShape.type === 'pen' && selectedNodeIndex !== null && targetShape.points) {
+            if (targetShape.points.length > 2) {
+              const updatedPoints = targetShape.points.filter((_, idx) => idx !== selectedNodeIndex);
+              setShapes((prev) =>
+                prev.map((s) => (s.id === selectedShapeId ? { ...s, points: updatedPoints } : s))
+              );
+              setSelectedNodeIndex(null);
+              pushHistory(shapes);
+            }
+          } else {
+            const nextShapes = shapes.filter((s) => s.id !== selectedShapeId);
+            setShapes(nextShapes);
+            setSelectedShapeId(null);
+            pushHistory(nextShapes);
+          }
         }
       } else if (e.key.toLowerCase() === 'v') {
         setActiveTool('select');
@@ -307,22 +343,19 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
         setActiveTool('circle');
       } else if (e.key.toLowerCase() === 'm') {
         setActiveTool('dimension');
-      } else if (e.key.toLowerCase() === 't') {
-        setActiveTool('text');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, selectedShapeId, shapes, pushHistory]);
+  }, [handleUndo, handleRedo, selectedShapeId, shapes, pushHistory, selectedNodeIndex]);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [currentPos, setCurrentPos] = useState<{ x: number; y: number } | null>(null);
 
-  // Handle drawing interaction
+  // Handle drawing & selection interaction
   const handleSVGMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (activeTool === 'select') return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -334,10 +367,26 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       y = Math.round(y / 20) * 20;
     }
 
+    if (activeTool === 'select') {
+      // Click on blank canvas space deselects
+      setSelectedShapeId(null);
+      setSelectedNodeIndex(null);
+      return;
+    }
+
     if (activeTool === 'pen') {
       // Add connected point
-      const newPts = [...penPoints, { x, y }];
+      const newPt = {
+        x,
+        y,
+        curveType: 'linear' as const,
+      };
+      const newPts = [...penPoints, newPt];
       setPenPoints(newPts);
+      
+      // Setup dragging of the control handle for click-and-drag Bezier creation!
+      setDraggingPenPointIndex(newPts.length - 1);
+      setIsDraggingHandle(true);
       return;
     }
 
@@ -352,28 +401,39 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       return;
     }
 
-    // Build SVG path data string from connected points
-    const pathStr = penPoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ') + (closed ? ' Z' : '');
-
     const xs = penPoints.map((p) => p.x);
     const ys = penPoints.map((p) => p.y);
     const minX = Math.min(...xs);
     const minY = Math.min(...ys);
-    const width = Math.max(30, Math.max(...xs) - minX);
-    const height = Math.max(30, Math.max(...ys) - minY);
+    const maxX = Math.max(...xs);
+    const maxY = Math.max(...ys);
+    const width = Math.max(20, maxX - minX);
+    const height = Math.max(20, maxY - minY);
+
+    // Create proper points with curveType
+    const pointsWithCurves = penPoints.map((pt) => {
+      return {
+        x: pt.x,
+        y: pt.y,
+        curveType: pt.curveType || 'linear',
+        cp1x: pt.cp1x,
+        cp1y: pt.cp1y
+      };
+    });
 
     const newShape: VectorShape = {
       id: `shape_${Date.now()}`,
-      type: 'rect', // We render custom label and shapes or custom SVG paths
+      type: 'pen',
       x: minX,
       y: minY,
       width,
       height,
-      fill: activeFill,
+      fill: closed ? activeFill : 'none',
       stroke: activeStroke,
       strokeWidth: 2,
+      points: pointsWithCurves,
       unit,
-      label: `Caminho Conectado (${penPoints.length} nós)`,
+      label: `Curva Bézier (${penPoints.length} nós${closed ? ', Fechado' : ''})`,
     };
 
     setShapes((prev) => [...prev, newShape]);
@@ -395,13 +455,132 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       y = Math.round(y / 20) * 20;
     }
 
+    // 1. DRAGGING PEN CONTROL POINT (DURING DRAWING)
+    if (activeTool === 'pen' && isDraggingHandle && draggingPenPointIndex !== null) {
+      setPenPoints((prev) => {
+        const updated = [...prev];
+        const pt = updated[draggingPenPointIndex];
+        if (pt) {
+          pt.curveType = 'bezier';
+          pt.cp1x = x;
+          pt.cp1y = y;
+        }
+        return updated;
+      });
+      return;
+    }
+
+    // 2. DRAGGING NODE / CONTROL POINT (IN SELECT MODE)
+    if (activeTool === 'select' && draggedNode) {
+      const { shapeId, nodeIndex, type } = draggedNode;
+      setShapes((prev) =>
+        prev.map((s) => {
+          if (s.id === shapeId && s.points) {
+            const updatedPoints = [...s.points];
+            const targetPt = { ...updatedPoints[nodeIndex] };
+
+            if (type === 'anchor') {
+              const dx = x - targetPt.x;
+              const dy = y - targetPt.y;
+              targetPt.x = x;
+              targetPt.y = y;
+              // Shift control points relatively
+              if (targetPt.cp1x !== undefined) targetPt.cp1x += dx;
+              if (targetPt.cp1y !== undefined) targetPt.cp1y += dy;
+            } else if (type === 'cp1') {
+              targetPt.cp1x = x;
+              targetPt.cp1y = y;
+            }
+
+            updatedPoints[nodeIndex] = targetPt;
+
+            // Recompute bounds
+            const xs = updatedPoints.map((p) => p.x);
+            const ys = updatedPoints.map((p) => p.y);
+            const minX = Math.min(...xs);
+            const minY = Math.min(...ys);
+            const maxX = Math.max(...xs);
+            const maxY = Math.max(...ys);
+            const width = Math.max(20, maxX - minX);
+            const height = Math.max(20, maxY - minY);
+
+            return {
+              ...s,
+              x: minX,
+              y: minY,
+              width,
+              height,
+              points: updatedPoints,
+            };
+          }
+          return s;
+        })
+      );
+      return;
+    }
+
+    // 3. DRAGGING SOLID SHAPE
+    if (activeTool === 'select' && draggedShapeId && lastDragPos) {
+      const dx = x - lastDragPos.x;
+      const dy = y - lastDragPos.y;
+
+      setShapes((prev) =>
+        prev.map((s) => {
+          if (s.id === draggedShapeId) {
+            if (s.type === 'pen' && s.points) {
+              const updatedPoints = s.points.map((pt) => ({
+                ...pt,
+                x: pt.x + dx,
+                y: pt.y + dy,
+                cp1x: pt.cp1x !== undefined ? pt.cp1x + dx : undefined,
+                cp1y: pt.cp1y !== undefined ? pt.cp1y + dy : undefined,
+              }));
+              return {
+                ...s,
+                x: s.x + dx,
+                y: s.y + dy,
+                points: updatedPoints,
+              };
+            }
+            return {
+              ...s,
+              x: s.x + dx,
+              y: s.y + dy,
+            };
+          }
+          return s;
+        })
+      );
+      setLastDragPos({ x, y });
+      return;
+    }
+
+    // 4. DRAWING PREVIEW FOR OTHER TOOLS
     if (isDrawing) {
       setCurrentPos({ x, y });
     }
   };
 
   const handleSVGMouseUp = () => {
-    if (activeTool === 'pen') return; // Pen handles clicks
+    if (activeTool === 'pen') {
+      setIsDraggingHandle(false);
+      setDraggingPenPointIndex(null);
+      return;
+    }
+
+    if (draggedNode) {
+      pushHistory(shapes);
+      setDraggedNode(null);
+      return;
+    }
+
+    if (draggedShapeId) {
+      pushHistory(shapes);
+      setDraggedShapeId(null);
+      setLastDragPos(null);
+      return;
+    }
+
     if (!isDrawing || !startPos || !currentPos) return;
     setIsDrawing(false);
 
@@ -409,6 +588,11 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
     const y = Math.min(startPos.y, currentPos.y);
     const width = Math.max(20, Math.abs(currentPos.x - startPos.x));
     const height = Math.max(20, Math.abs(currentPos.y - startPos.y));
+
+    let shapeLabel = 'Novo Elemento Vetorial';
+    if (activeTool === 'rect') shapeLabel = 'Retângulo Técnico';
+    if (activeTool === 'circle') shapeLabel = 'Elipse Vetorial';
+    if (activeTool === 'dimension') shapeLabel = `${pxToUnit(width)} ${unit}`;
 
     const newShape: VectorShape = {
       id: `shape_${Date.now()}`,
@@ -421,14 +605,7 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
       stroke: activeTool === 'dimension' ? '#38bdf8' : activeStroke,
       strokeWidth: 2,
       unit,
-      label:
-        activeTool === 'star'
-          ? 'Estrela Vetorial 5-Pontas'
-          : activeTool === 'polygon'
-          ? 'Polígono Hexagonal'
-          : activeTool === 'dimension'
-          ? `${pxToUnit(width)} ${unit}`
-          : 'Novo Elemento Vetorial',
+      label: shapeLabel,
     };
 
     setShapes((prev) => [...prev, newShape]);
@@ -461,6 +638,27 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
     link.href = url;
     link.download = `Aether_Vetor_Precisao_${Date.now()}.svg`;
     link.click();
+  };
+
+  // Helper to construct the d path for pen shapes
+  const getPathData = (shape: VectorShape): string => {
+    if (!shape.points || shape.points.length === 0) return '';
+    let d = '';
+    shape.points.forEach((pt, idx) => {
+      if (idx === 0) {
+        d += `M ${pt.x} ${pt.y}`;
+      } else {
+        if (pt.curveType === 'bezier' && pt.cp1x !== undefined && pt.cp1y !== undefined) {
+          d += ` Q ${pt.cp1x} ${pt.cp1y}, ${pt.x} ${pt.y}`;
+        } else {
+          d += ` L ${pt.x} ${pt.y}`;
+        }
+      }
+    });
+    if (shape.fill !== 'none') {
+      d += ' Z';
+    }
+    return d;
   };
 
   return (
@@ -596,9 +794,26 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
 
             <div className="h-4 w-[1px] bg-slate-800" />
 
-            <div className="flex items-center gap-2 text-xs text-slate-300 font-medium">
-              <Grid className="w-4 h-4 text-emerald-400" />
-              <span>Grade de Precisão: 20px / 5.3mm</span>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-slate-400 font-semibold">Presets:</span>
+              <button
+                onClick={() => handleLoadVectorPreset('logo')}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px]"
+              >
+                Logo Tech
+              </button>
+              <button
+                onClick={() => handleLoadVectorPreset('cartoon')}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px]"
+              >
+                Boneco Cartoon
+              </button>
+              <button
+                onClick={() => handleLoadVectorPreset('realistic')}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px]"
+              >
+                Gradiente 3D
+              </button>
             </div>
           </div>
 
@@ -636,7 +851,7 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
 
               if (shape.type === 'rect') {
                 return (
-                  <g key={shape.id} onClick={() => setSelectedShapeId(shape.id)}>
+                  <g key={shape.id}>
                     <rect
                       x={shape.x}
                       y={shape.y}
@@ -646,6 +861,15 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                       stroke={shape.stroke}
                       strokeWidth={shape.strokeWidth}
                       rx={4}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (activeTool === 'select') {
+                          setSelectedShapeId(shape.id);
+                          setSelectedNodeIndex(null);
+                          setDraggedShapeId(shape.id);
+                          setLastDragPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
                       className="cursor-pointer hover:stroke-cyan-400 transition-colors"
                     />
                     {isSelected && (
@@ -681,7 +905,7 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                 const rx = shape.width / 2;
                 const ry = shape.height / 2;
                 return (
-                  <g key={shape.id} onClick={() => setSelectedShapeId(shape.id)}>
+                  <g key={shape.id}>
                     <ellipse
                       cx={shape.x + rx}
                       cy={shape.y + ry}
@@ -690,6 +914,15 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                       fill={shape.fill}
                       stroke={shape.stroke}
                       strokeWidth={shape.strokeWidth}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (activeTool === 'select') {
+                          setSelectedShapeId(shape.id);
+                          setSelectedNodeIndex(null);
+                          setDraggedShapeId(shape.id);
+                          setLastDragPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
                       className="cursor-pointer hover:stroke-cyan-400 transition-colors"
                     />
                     {isSelected && (
@@ -710,7 +943,7 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
 
               if (shape.type === 'dimension') {
                 return (
-                  <g key={shape.id} onClick={() => setSelectedShapeId(shape.id)}>
+                  <g key={shape.id}>
                     {/* Dimension Arrow Line */}
                     <line
                       x1={shape.x}
@@ -719,6 +952,16 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                       y2={shape.y + 10}
                       stroke={shape.stroke}
                       strokeWidth={shape.strokeWidth}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (activeTool === 'select') {
+                          setSelectedShapeId(shape.id);
+                          setSelectedNodeIndex(null);
+                          setDraggedShapeId(shape.id);
+                          setLastDragPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      className="cursor-move"
                     />
                     <line
                       x1={shape.x}
@@ -743,10 +986,100 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                       fontSize="10"
                       fontWeight="bold"
                       textAnchor="middle"
-                      className="font-mono"
+                      className="font-mono cursor-pointer"
+                      onClick={() => setSelectedShapeId(shape.id)}
                     >
                       {shape.label || `${pxToUnit(shape.width)} ${unit}`}
                     </text>
+                  </g>
+                );
+              }
+
+              if (shape.type === 'pen') {
+                return (
+                  <g key={shape.id}>
+                    {/* Main path */}
+                    <path
+                      d={getPathData(shape)}
+                      fill={shape.fill}
+                      stroke={shape.stroke}
+                      strokeWidth={shape.strokeWidth}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (activeTool === 'select') {
+                          setSelectedShapeId(shape.id);
+                          setDraggedShapeId(shape.id);
+                          setLastDragPos({ x: e.clientX, y: e.clientY });
+                        }
+                      }}
+                      className="cursor-pointer hover:stroke-cyan-400 transition-colors"
+                    />
+
+                    {/* Nodes and Bezier handles (Only when Selected in select tool) */}
+                    {isSelected && activeTool === 'select' && shape.points && (
+                      <g>
+                        {shape.points.map((pt, idx) => {
+                          const isNodeSelected = selectedNodeIndex === idx;
+                          return (
+                            <g key={idx}>
+                              {/* Anchor line for Bezier control point cp1 */}
+                              {pt.curveType === 'bezier' && pt.cp1x !== undefined && pt.cp1y !== undefined && (
+                                <g>
+                                  <line
+                                    x1={pt.x}
+                                    y1={pt.y}
+                                    x2={pt.cp1x}
+                                    y2={pt.cp1y}
+                                    stroke="#10b981"
+                                    strokeWidth="1.2"
+                                    strokeDasharray="2 2"
+                                  />
+                                  {/* Control point 1 handle */}
+                                  <circle
+                                    cx={pt.cp1x}
+                                    cy={pt.cp1y}
+                                    r="5.5"
+                                    fill="#10b981"
+                                    stroke="#ffffff"
+                                    strokeWidth="1.5"
+                                    className="cursor-move hover:fill-emerald-300"
+                                    onMouseDown={(e) => {
+                                      e.stopPropagation();
+                                      setDraggedNode({
+                                        shapeId: shape.id,
+                                        nodeIndex: idx,
+                                        type: 'cp1',
+                                      });
+                                      setSelectedNodeIndex(idx);
+                                    }}
+                                  />
+                                </g>
+                              )}
+
+                              {/* Principal Anchor point */}
+                              <circle
+                                cx={pt.x}
+                                cy={pt.y}
+                                r={isNodeSelected ? '7' : '5'}
+                                fill={isNodeSelected ? '#ef4444' : '#3b82f6'}
+                                stroke="#ffffff"
+                                strokeWidth="2"
+                                className="cursor-move hover:fill-indigo-300"
+                                onMouseDown={(e) => {
+                                  e.stopPropagation();
+                                  setDraggedNode({
+                                    shapeId: shape.id,
+                                    nodeIndex: idx,
+                                    type: 'anchor',
+                                  });
+                                  setSelectedNodeIndex(idx);
+                                }}
+                              />
+                            </g>
+                          );
+                        })}
+                      </g>
+                    )}
                   </g>
                 );
               }
@@ -758,23 +1091,46 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
             {penPoints.length > 0 && (
               <g>
                 <path
-                  d={penPoints.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ')}
+                  d={getPathData({ points: penPoints, fill: 'none' } as any)}
                   fill="none"
                   stroke="#38bdf8"
-                  strokeWidth="2.5"
+                  strokeWidth="2"
                   strokeDasharray="4 2"
                 />
                 {penPoints.map((pt, idx) => (
-                  <circle
-                    key={idx}
-                    cx={pt.x}
-                    cy={pt.y}
-                    r="4.5"
-                    fill="#38bdf8"
-                    stroke="#ffffff"
-                    strokeWidth="1.5"
-                    className="animate-pulse"
-                  />
+                  <g key={idx}>
+                    {/* Anchor point */}
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r="5.5"
+                      fill="#38bdf8"
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                    />
+                    {/* Bezier control handle preview */}
+                    {pt.curveType === 'bezier' && pt.cp1x !== undefined && pt.cp1y !== undefined && (
+                      <g>
+                        <line
+                          x1={pt.x}
+                          y1={pt.y}
+                          x2={pt.cp1x}
+                          y2={pt.cp1y}
+                          stroke="#10b981"
+                          strokeWidth="1.2"
+                          strokeDasharray="2 2"
+                        />
+                        <circle
+                          cx={pt.cp1x}
+                          cy={pt.cp1y}
+                          r="4.5"
+                          fill="#10b981"
+                          stroke="#ffffff"
+                          strokeWidth="1"
+                        />
+                      </g>
+                    )}
+                  </g>
                 ))}
               </g>
             )}
@@ -919,6 +1275,25 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                 </div>
 
                 <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Cor de Preenchimento:</span>
+                  <input
+                    type="color"
+                    value={activeShape.fill === 'none' ? '#6366f1' : activeShape.fill.startsWith('rgba') ? '#6366f1' : activeShape.fill}
+                    onChange={(e) => updateSelectedShape('fill', e.target.value)}
+                    className="w-6 h-6 rounded bg-transparent cursor-pointer border-0 p-0"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => updateSelectedShape('fill', activeShape.fill === 'none' ? 'rgba(99,102,241,0.25)' : 'none')}
+                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 rounded"
+                  >
+                    {activeShape.fill === 'none' ? 'Ativar Preenchimento' : 'Remover Preenchimento'}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
                   <span className="text-slate-400">Espessura do Traço:</span>
                   <input
                     type="number"
@@ -932,6 +1307,136 @@ export const VectorStudio: React.FC<VectorStudioProps> = ({ onUndoStateChange })
                   />
                 </div>
               </div>
+
+              {/* Bézier Node inspector */}
+              {activeShape.type === 'pen' && activeShape.points && selectedNodeIndex !== null && activeShape.points[selectedNodeIndex] && (
+                <div className="pt-3 border-t border-slate-800 space-y-3">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                    Nó Bézier Selecionado (#{selectedNodeIndex + 1})
+                  </span>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                      <span className="text-[9px] text-slate-500 block">Nó X ({unit})</span>
+                      <input
+                        type="number"
+                        value={pxToUnit(activeShape.points[selectedNodeIndex].x)}
+                        onChange={(e) => {
+                          const val = unitToPx(Number(e.target.value));
+                          const updatedPts = [...(activeShape.points || [])];
+                          if (updatedPts[selectedNodeIndex]) {
+                            updatedPts[selectedNodeIndex] = { ...updatedPts[selectedNodeIndex], x: val };
+                            updateSelectedShape('points', updatedPts);
+                          }
+                        }}
+                        className="w-full bg-transparent font-mono text-cyan-300 text-xs focus:outline-none"
+                      />
+                    </div>
+                    <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                      <span className="text-[9px] text-slate-500 block">Nó Y ({unit})</span>
+                      <input
+                        type="number"
+                        value={pxToUnit(activeShape.points[selectedNodeIndex].y)}
+                        onChange={(e) => {
+                          const val = unitToPx(Number(e.target.value));
+                          const updatedPts = [...(activeShape.points || [])];
+                          if (updatedPts[selectedNodeIndex]) {
+                            updatedPts[selectedNodeIndex] = { ...updatedPts[selectedNodeIndex], y: val };
+                            updateSelectedShape('points', updatedPts);
+                          }
+                        }}
+                        className="w-full bg-transparent font-mono text-cyan-300 text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-slate-500 block">Tipo de Curva</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          const updatedPts = [...(activeShape.points || [])];
+                          if (updatedPts[selectedNodeIndex]) {
+                            updatedPts[selectedNodeIndex] = {
+                              ...updatedPts[selectedNodeIndex],
+                              curveType: 'linear',
+                              cp1x: undefined,
+                              cp1y: undefined,
+                            };
+                            updateSelectedShape('points', updatedPts);
+                          }
+                        }}
+                        className={`flex-1 py-1 text-[10px] font-bold rounded ${
+                          activeShape.points[selectedNodeIndex].curveType !== 'bezier'
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Linear
+                      </button>
+                      <button
+                        onClick={() => {
+                          const updatedPts = [...(activeShape.points || [])];
+                          const pt = updatedPts[selectedNodeIndex];
+                          if (pt) {
+                            updatedPts[selectedNodeIndex] = {
+                              ...pt,
+                              curveType: 'bezier',
+                              cp1x: pt.x + 30,
+                              cp1y: pt.y - 30,
+                            };
+                            updateSelectedShape('points', updatedPts);
+                          }
+                        }}
+                        className={`flex-1 py-1 text-[10px] font-bold rounded ${
+                          activeShape.points[selectedNodeIndex].curveType === 'bezier'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Bézier
+                      </button>
+                    </div>
+                  </div>
+
+                  {activeShape.points[selectedNodeIndex].curveType === 'bezier' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                        <span className="text-[9px] text-slate-500 block">Alça X ({unit})</span>
+                        <input
+                          type="number"
+                          value={pxToUnit(activeShape.points[selectedNodeIndex].cp1x || 0)}
+                          onChange={(e) => {
+                            const val = unitToPx(Number(e.target.value));
+                            const updatedPts = [...(activeShape.points || [])];
+                            if (updatedPts[selectedNodeIndex]) {
+                              updatedPts[selectedNodeIndex] = { ...updatedPts[selectedNodeIndex], cp1x: val };
+                              updateSelectedShape('points', updatedPts);
+                            }
+                          }}
+                          className="w-full bg-transparent font-mono text-emerald-400 text-xs focus:outline-none"
+                        />
+                      </div>
+                      <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                        <span className="text-[9px] text-slate-500 block">Alça Y ({unit})</span>
+                        <input
+                          type="number"
+                          value={pxToUnit(activeShape.points[selectedNodeIndex].cp1y || 0)}
+                          onChange={(e) => {
+                            const val = unitToPx(Number(e.target.value));
+                            const updatedPts = [...(activeShape.points || [])];
+                            if (updatedPts[selectedNodeIndex]) {
+                              updatedPts[selectedNodeIndex] = { ...updatedPts[selectedNodeIndex], cp1y: val };
+                              updateSelectedShape('points', updatedPts);
+                            }
+                          }}
+                          className="w-full bg-transparent font-mono text-emerald-400 text-xs focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-xs text-slate-500 py-6 text-center">

@@ -353,6 +353,170 @@ export const SpreadsheetStudio: React.FC = () => {
     a.click();
   };
 
+  // Professional PDF/Printing handler
+  const handlePrintPDF = () => {
+    // Create print stylesheet dynamically to style spreadsheet/dashboard elegantly for paper
+    const style = document.createElement('style');
+    style.id = 'spreadsheet-print-override-style';
+    style.innerHTML = `
+      @media print {
+        /* General body resets */
+        body, html, #root {
+          background: #ffffff !important;
+          color: #000000 !important;
+          width: 100% !important;
+          height: auto !important;
+          overflow: visible !important;
+          padding: 0 !important;
+          margin: 0 !important;
+        }
+
+        /* Hide all UI shell and elements marked no-print */
+        header, 
+        aside, 
+        .no-print, 
+        .formatting-toolbar, 
+        .preset-toolbar, 
+        .formula-bar,
+        button, 
+        select, 
+        input[type="file"],
+        .quick-controls,
+        .modal,
+        .fixed {
+          display: none !important;
+          visibility: hidden !important;
+          height: 0 !important;
+          width: 0 !important;
+          padding: 0 !important;
+          margin: 0 !important;
+        }
+
+        /* Force target content visible and centered */
+        #spreadsheet-studio-root {
+          display: block !important;
+          background: #ffffff !important;
+          color: #000000 !important;
+          padding: 20px !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          height: auto !important;
+          overflow: visible !important;
+          position: static !important;
+        }
+
+        /* Print-friendly Typography */
+        h2, h3, h4, p, span, td, th {
+          color: #000000 !important;
+        }
+
+        /* Format Spreadsheet Table Grid */
+        table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+          margin-top: 15px !important;
+          color: #000000 !important;
+          page-break-inside: auto;
+        }
+
+        tr {
+          page-break-inside: avoid;
+          page-break-after: auto;
+        }
+
+        th {
+          background-color: #f1f5f9 !important;
+          color: #0f172a !important;
+          font-weight: bold !important;
+          border: 1.5px solid #64748b !important;
+          padding: 8px !important;
+        }
+
+        td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 8px !important;
+          background-color: #ffffff !important;
+        }
+
+        td input {
+          background: transparent !important;
+          border: none !important;
+          color: #000000 !important;
+          font-family: inherit !important;
+          font-size: inherit !important;
+          width: 100% !important;
+        }
+
+        /* Format Dashboard widgets */
+        .dashboard-container {
+          background: #ffffff !important;
+          color: #000000 !important;
+          display: flex !important;
+          flex-direction: column !important;
+          gap: 24px !important;
+        }
+
+        .kpi-cards-grid {
+          display: grid !important;
+          grid-template-cols: repeat(4, 1fr) !important;
+          gap: 15px !important;
+          margin-bottom: 25px !important;
+          page-break-inside: avoid;
+        }
+
+        .kpi-card {
+          border: 1.5px solid #cbd5e1 !important;
+          background: #f8fafc !important;
+          border-radius: 12px !important;
+          padding: 15px !important;
+          box-shadow: none !important;
+          color: #000000 !important;
+          page-break-inside: avoid;
+        }
+
+        .charts-grid {
+          display: grid !important;
+          grid-template-cols: 1fr !important;
+          gap: 30px !important;
+        }
+
+        .chart-widget {
+          border: 1.5px solid #cbd5e1 !important;
+          background: #ffffff !important;
+          border-radius: 16px !important;
+          padding: 20px !important;
+          box-shadow: none !important;
+          color: #000000 !important;
+          page-break-inside: avoid;
+          margin-bottom: 20px !important;
+          height: 380px !important;
+        }
+
+        /* SVG charts coloring tweaks for printing */
+        svg {
+          filter: drop-shadow(none) !important;
+        }
+
+        /* Native color adjustment forcing */
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Give a micro-delay for styling to register, then invoke native print dialog
+    setTimeout(() => {
+      window.print();
+      // Remove styles after print layout closes to restore original screen appearance
+      setTimeout(() => {
+        const el = document.getElementById('spreadsheet-print-override-style');
+        if (el) el.remove();
+      }, 1000);
+    }, 150);
+  };
+
   // Import CSV File
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -387,9 +551,9 @@ export const SpreadsheetStudio: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div id="spreadsheet-studio-root" className="h-full flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Top Header Bar */}
-      <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md">
+      <div className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md no-print">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 text-white shadow-lg shadow-cyan-500/20">
             <FileSpreadsheet className="w-5 h-5" />
@@ -447,6 +611,15 @@ export const SpreadsheetStudio: React.FC = () => {
             <Download className="w-3.5 h-3.5" />
             Exportar CSV
           </button>
+
+          <button
+            onClick={handlePrintPDF}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold shadow-md transition-all"
+            title="Imprimir Planilha ou Exportar PDF"
+          >
+            <Printer className="w-3.5 h-3.5 text-indigo-400" />
+            Imprimir / PDF
+          </button>
         </div>
       </div>
 
@@ -454,7 +627,7 @@ export const SpreadsheetStudio: React.FC = () => {
       {activeTab === 'grid' ? (
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Formatting & Preset Toolbar */}
-          <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs no-print formatting-toolbar">
             {/* Presets */}
             <div className="flex items-center gap-2">
               <span className="text-slate-400 font-medium">Modelos:</span>
@@ -602,7 +775,7 @@ export const SpreadsheetStudio: React.FC = () => {
         </div>
       ) : (
         /* Dashboard & Charts Tab */
-        <div className="flex-1 p-6 overflow-y-auto bg-slate-950 space-y-6 relative">
+        <div className="flex-1 p-6 overflow-y-auto bg-slate-950 space-y-6 relative dashboard-container">
           {/* Controls Bar for Dashboard */}
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-xl">
             <div className="flex items-center gap-3">
@@ -631,10 +804,10 @@ export const SpreadsheetStudio: React.FC = () => {
               </button>
 
               <button
-                onClick={() => window.print()}
+                onClick={handlePrintPDF}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium flex items-center gap-1.5 transition-all"
               >
-                <Printer className="w-4 h-4" />
+                <Printer className="w-4 h-4 text-indigo-400" />
                 Imprimir / PDF
               </button>
             </div>
@@ -676,8 +849,8 @@ export const SpreadsheetStudio: React.FC = () => {
           </div>
 
           {/* KPI Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 kpi-cards-grid">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden kpi-card">
               <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl" />
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Acumulado</p>
               <h4 className="text-2xl font-extrabold text-white mt-1">
@@ -688,7 +861,7 @@ export const SpreadsheetStudio: React.FC = () => {
               </p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden kpi-card">
               <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl" />
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Média por Registro</p>
               <h4 className="text-2xl font-extrabold text-cyan-400 mt-1">
@@ -697,7 +870,7 @@ export const SpreadsheetStudio: React.FC = () => {
               <p className="text-xs text-slate-400 mt-2">Calculado em {kpis.count} registros ativos</p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden kpi-card">
               <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl" />
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pico Máximo</p>
               <h4 className="text-2xl font-extrabold text-purple-300 mt-1">
@@ -706,7 +879,7 @@ export const SpreadsheetStudio: React.FC = () => {
               <p className="text-xs text-purple-400 mt-2">Maior resultado registrado</p>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-lg relative overflow-hidden kpi-card">
               <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl" />
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total de Registros</p>
               <h4 className="text-2xl font-extrabold text-emerald-400 mt-1">{kpis.count} itens</h4>
@@ -715,11 +888,11 @@ export const SpreadsheetStudio: React.FC = () => {
           </div>
 
           {/* Dynamic Multi-Chart Dashboard Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 charts-grid">
             {widgets.map((w) => {
               const widgetData = getWidgetData(w.categoryCol, w.valueCol);
               return (
-                <div key={w.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col min-h-[340px]">
+                <div key={w.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col min-h-[340px] chart-widget">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
                       <BarChart3 className="w-4 h-4 text-indigo-400" />

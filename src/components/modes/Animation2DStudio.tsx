@@ -254,6 +254,21 @@ export const Animation2DStudio: React.FC = () => {
   const [onionSkin, setOnionSkin] = useState<boolean>(true);
   const [showInBetweenGuide, setShowInBetweenGuide] = useState<boolean>(true);
 
+  // Advanced character and drawing assistant states
+  const [leftTab, setLeftTab] = useState<'brushes' | 'guides'>('brushes');
+  const [smoothingLevel, setSmoothingLevel] = useState<number>(4); // Brush stabilizer (0 to 15)
+  const [symmetryEnabled, setSymmetryEnabled] = useState<boolean>(false);
+  const [symmetryAxis, setSymmetryAxis] = useState<'x' | 'y'>('x');
+  const [mannequinType, setMannequinType] = useState<'none' | 'loomis_f' | 'loomis_p' | 'mannequin_f' | 'action_run' | 'action_jump'>('none');
+  const [mannequinOpacity, setMannequinOpacity] = useState<number>(0.3);
+  const [perspectiveGrid, setPerspectiveGrid] = useState<'none' | '1point' | '2point'>('none');
+  const [perspectiveOpacity, setPerspectiveOpacity] = useState<number>(0.2);
+  const [inBetweenTiming, setInBetweenTiming] = useState<number>(0.5); // 0.1 to 0.9. 0.5 is linear.
+  const [inBetweenEasing, setInBetweenEasing] = useState<'linear' | 'ease-in' | 'ease-out' | 'ease-in-out'>('linear');
+
+  // Ref to store stylus / mouse draw history for stabilization
+  const pointerHistoryRef = useRef<Point[]>([]);
+
   // Brush & Tools State
   const [activeTool, setActiveTool] = useState<'brush' | 'eraser' | 'pipette' | 'fill' | 'line' | 'rectangle' | 'circle'>('brush');
   const [activeCategory, setActiveCategory] = useState<BrushCategory>('fundamentais');
@@ -285,6 +300,415 @@ export const Animation2DStudio: React.FC = () => {
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
+  }, []);
+
+  // Helper to calculate the mirrored coordinate for Symmetry
+  const getSymmetryPoint = useCallback((pt: Point): Point => {
+    if (symmetryAxis === 'x') {
+      return { x: CANVAS_WIDTH - pt.x, y: pt.y, pressure: pt.pressure };
+    } else {
+      return { x: pt.x, y: CANVAS_HEIGHT - pt.y, pressure: pt.pressure };
+    }
+  }, [symmetryAxis]);
+
+  // Drawing dynamic and detailed perspective grids
+  const drawPerspectiveGrid = useCallback((ctx: CanvasRenderingContext2D, type: '1point' | '2point', opacity: number) => {
+    ctx.save();
+    ctx.strokeStyle = `rgba(99, 102, 241, ${opacity})`; // Indigo color for perspective lines
+    ctx.lineWidth = 1;
+    
+    if (type === '1point') {
+      const vX = CANVAS_WIDTH / 2;
+      const vY = CANVAS_HEIGHT / 2;
+      
+      // Horizon line
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(239, 68, 68, ${opacity * 1.5})`; // Red horizon
+      ctx.moveTo(0, vY);
+      ctx.lineTo(CANVAS_WIDTH, vY);
+      ctx.stroke();
+      
+      ctx.strokeStyle = `rgba(99, 102, 241, ${opacity})`;
+      // Rays extending from center vanishing point
+      for (let angle = 0; angle < 360; angle += 15) {
+        const rad = (angle * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(vX, vY);
+        ctx.lineTo(vX + Math.cos(rad) * 1200, vY + Math.sin(rad) * 1200);
+        ctx.stroke();
+      }
+      
+      // Rectangular frames extending outward (concentric depth guides)
+      for (let size = 50; size < 800; size += 60) {
+        ctx.beginPath();
+        ctx.strokeRect(vX - size, vY - size * 0.75, size * 2, size * 1.5);
+      }
+    } else if (type === '2point') {
+      const horizonY = CANVAS_HEIGHT / 2 + 50;
+      const vp1 = { x: -150, y: horizonY };
+      const vp2 = { x: CANVAS_WIDTH + 150, y: horizonY };
+      
+      // Horizon
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(239, 68, 68, ${opacity * 1.5})`;
+      ctx.moveTo(0, horizonY);
+      ctx.lineTo(CANVAS_WIDTH, horizonY);
+      ctx.stroke();
+      
+      ctx.strokeStyle = `rgba(99, 102, 241, ${opacity})`;
+      
+      // Rays from left vanishing point (limit to realistic visual angles)
+      for (let angle = -60; angle <= 60; angle += 6) {
+        const rad = (angle * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(vp1.x, vp1.y);
+        ctx.lineTo(vp1.x + Math.cos(rad) * 1500, vp1.y + Math.sin(rad) * 1500);
+        ctx.stroke();
+      }
+      
+      // Rays from right vanishing point
+      for (let angle = 120; angle <= 240; angle += 6) {
+        const rad = (angle * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(vp2.x, vp2.y);
+        ctx.lineTo(vp2.x + Math.cos(rad) * 1500, vp2.y + Math.sin(rad) * 1500);
+        ctx.stroke();
+      }
+    }
+    
+    ctx.restore();
+  }, []);
+
+  // Drawing professional anatomy & action mannequins
+  const drawMannequin = useCallback((ctx: CanvasRenderingContext2D, type: string, opacity: number) => {
+    ctx.save();
+    ctx.strokeStyle = `rgba(16, 185, 129, ${opacity})`; // Teal emerald for mannequins
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    const cX = CANVAS_WIDTH / 2;
+    const cY = CANVAS_HEIGHT / 2;
+    
+    if (type === 'loomis_f') {
+      // 1. Loomis Head Frontal view
+      const r = 120;
+      // Main head circle
+      ctx.beginPath();
+      ctx.arc(cX, cY - 20, r, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Horizontal and vertical axis lines
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      // Vertical central axis (axis of symmetry)
+      ctx.moveTo(cX, cY - 160);
+      ctx.lineTo(cX, cY + 180);
+      // Brow line (center of circle)
+      ctx.moveTo(cX - 140, cY - 20);
+      ctx.lineTo(cX + 140, cY - 20);
+      ctx.stroke();
+      
+      ctx.setLineDash([]);
+      // Hairline (top of circle slice)
+      const hairY = cY - 20 - (r / 3) * 2;
+      ctx.beginPath();
+      ctx.moveTo(cX - 80, hairY);
+      ctx.lineTo(cX + 80, hairY);
+      // Nose line (bottom of circle)
+      const noseY = cY - 20 + (r / 3) * 2;
+      ctx.beginPath();
+      ctx.moveTo(cX - 80, noseY);
+      ctx.lineTo(cX + 80, noseY);
+      // Chin line
+      const chinY = cY - 20 + r + 20;
+      ctx.beginPath();
+      ctx.moveTo(cX - 40, chinY);
+      ctx.lineTo(cX + 40, chinY);
+      ctx.stroke();
+      
+      // Jaw outline
+      ctx.beginPath();
+      ctx.moveTo(cX - r + 15, cY - 20);
+      ctx.quadraticCurveTo(cX - r + 20, noseY, cX - 40, chinY);
+      ctx.lineTo(cX + 40, chinY);
+      ctx.quadraticCurveTo(cX + r - 20, noseY, cX + r - 15, cY - 20);
+      ctx.stroke();
+      
+      // Eyes axis line
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(16, 185, 129, ${opacity * 0.6})`;
+      ctx.moveTo(cX - 100, cY + 15);
+      ctx.lineTo(cX + 100, cY + 15);
+      ctx.stroke();
+      
+    } else if (type === 'loomis_p') {
+      // 2. Loomis Head Profile view
+      const r = 120;
+      const headX = cX - 20;
+      const headY = cY - 20;
+      
+      // Outer sphere
+      ctx.beginPath();
+      ctx.arc(headX, headY, r, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Side flat circle slice (profile flat plane)
+      ctx.beginPath();
+      ctx.ellipse(headX + 20, headY, r * 0.7, r * 0.7, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Cross lines on side plane
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(headX + 20, headY - r * 0.7);
+      ctx.lineTo(headX + 20, headY + r * 0.7);
+      ctx.moveTo(headX + 20 - r * 0.7, headY);
+      ctx.lineTo(headX + 20 + r * 0.7, headY);
+      ctx.stroke();
+      
+      ctx.setLineDash([]);
+      // Facial profile silhouette line
+      ctx.beginPath();
+      const hairY = headY - (r / 3) * 2;
+      const noseY = headY + (r / 3) * 2;
+      const chinY = headY + r + 20;
+      
+      ctx.moveTo(headX + r, hairY);
+      ctx.lineTo(headX + r + 20, headY - 10); // brow box
+      ctx.lineTo(headX + r + 5, headY + 10); // bridge
+      ctx.lineTo(headX + r + 35, noseY); // nose tip
+      ctx.lineTo(headX + r + 10, noseY + 10); // nose base
+      ctx.lineTo(headX + r + 15, noseY + 25); // lips
+      ctx.lineTo(headX + r + 5, noseY + 35); // mouth crease
+      ctx.lineTo(headX + r + 20, chinY); // chin
+      ctx.lineTo(headX + r - 30, chinY); // jaw line bottom
+      ctx.lineTo(headX + 20, headY + r * 0.7); // back jaw angle
+      ctx.stroke();
+      
+    } else if (type === 'mannequin_f') {
+      // 3. Proportions 8-Head Grid & Pose (Frontal view)
+      const topY = 60;
+      const bottomY = CANVAS_HEIGHT - 60;
+      const totalH = bottomY - topY;
+      const headH = totalH / 8;
+      
+      ctx.save();
+      ctx.strokeStyle = `rgba(16, 185, 129, ${opacity * 0.4})`;
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 8; i++) {
+        const y = topY + i * headH;
+        ctx.beginPath();
+        ctx.moveTo(cX - 220, y);
+        ctx.lineTo(cX + 220, y);
+        ctx.stroke();
+        
+        ctx.fillStyle = `rgba(16, 185, 129, ${opacity * 0.8})`;
+        ctx.font = '10px monospace';
+        ctx.fillText(`H${i}`, cX - 240, y + 4);
+      }
+      ctx.restore();
+      
+      // Draw simplified mannequin figure
+      // Head (0-1)
+      ctx.beginPath();
+      ctx.ellipse(cX, topY + headH / 2, headH * 0.35, headH / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Neck & Shoulders (1 to 1.3)
+      ctx.beginPath();
+      ctx.moveTo(cX, topY + headH);
+      ctx.lineTo(cX, topY + headH * 1.3);
+      // Shoulder bar
+      ctx.moveTo(cX - headH * 0.9, topY + headH * 1.3);
+      ctx.lineTo(cX + headH * 0.9, topY + headH * 1.3);
+      ctx.stroke();
+      
+      // Ribcage (Chest) (1.3 to 3.0)
+      ctx.beginPath();
+      ctx.ellipse(cX, topY + headH * 2.1, headH * 0.7, headH * 0.75, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Spine
+      ctx.beginPath();
+      ctx.moveTo(cX, topY + headH * 2.85);
+      ctx.lineTo(cX, topY + headH * 3.8);
+      ctx.stroke();
+      
+      // Pelvis (Hips) (3.5 to 4.0)
+      ctx.beginPath();
+      ctx.ellipse(cX, topY + headH * 3.75, headH * 0.65, headH * 0.35, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Legs (Thighs to knees 4.0 to 6.0)
+      const kneeY = topY + headH * 5.8;
+      const ankleY = topY + headH * 7.7;
+      
+      // Left leg
+      ctx.beginPath();
+      ctx.moveTo(cX - headH * 0.45, topY + headH * 3.75); // Left hip
+      ctx.lineTo(cX - headH * 0.4, kneeY); // Left knee joint
+      ctx.lineTo(cX - headH * 0.35, ankleY); // Left ankle
+      ctx.lineTo(cX - headH * 0.55, ankleY + headH * 0.3); // Left foot
+      ctx.stroke();
+      
+      // Right leg
+      ctx.beginPath();
+      ctx.moveTo(cX + headH * 0.45, topY + headH * 3.75); // Right hip
+      ctx.lineTo(cX + headH * 0.4, kneeY); // Right knee joint
+      ctx.lineTo(cX + headH * 0.35, ankleY); // Right ankle
+      ctx.lineTo(cX + headH * 0.55, ankleY + headH * 0.3); // Right foot
+      ctx.stroke();
+      
+      // Joint circles (knees & hips)
+      ctx.beginPath();
+      ctx.arc(cX - headH * 0.4, kneeY, 6, 0, Math.PI * 2);
+      ctx.arc(cX + headH * 0.4, kneeY, 6, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Arms (Shoulder to elbow 1.3 to 2.8, elbow to hand 2.8 to 4.2)
+      const elbowY = topY + headH * 2.8;
+      const handY = topY + headH * 4.2;
+      
+      // Left arm
+      ctx.beginPath();
+      ctx.moveTo(cX - headH * 0.9, topY + headH * 1.3); // Left shoulder
+      ctx.lineTo(cX - headH * 1.15, elbowY); // Left elbow
+      ctx.lineTo(cX - headH * 1.05, handY); // Left hand
+      ctx.stroke();
+      
+      // Right arm
+      ctx.beginPath();
+      ctx.moveTo(cX + headH * 0.9, topY + headH * 1.3); // Right shoulder
+      ctx.lineTo(cX + headH * 1.15, elbowY); // Right elbow
+      ctx.lineTo(cX + headH * 1.05, handY); // Right hand
+      ctx.stroke();
+      
+    } else if (type === 'action_run') {
+      // 4. Action Pose: Run profile loop guide
+      ctx.beginPath();
+      // Head
+      ctx.arc(cX + 80, cY - 140, 32, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Spine torso arching forward
+      ctx.beginPath();
+      ctx.moveTo(cX + 75, cY - 108);
+      ctx.quadraticCurveTo(cX + 20, cY - 60, cX - 10, cY + 10); // spine
+      ctx.stroke();
+      
+      // Shoulders & Chest
+      ctx.beginPath();
+      ctx.ellipse(cX + 45, cY - 80, 42, 28, Math.PI / 6, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Pelvis
+      ctx.beginPath();
+      ctx.ellipse(cX - 10, cY + 20, 30, 18, -Math.PI / 12, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Left Leg (reaching forward)
+      ctx.beginPath();
+      ctx.moveTo(cX - 15, cY + 15); // hip
+      ctx.lineTo(cX + 40, cY + 90); // knee forward
+      ctx.lineTo(cX + 90, cY + 160); // ankle
+      ctx.lineTo(cX + 120, cY + 165); // foot
+      ctx.stroke();
+      
+      // Right Leg (pushing backward)
+      ctx.beginPath();
+      ctx.moveTo(cX, cY + 25); // hip
+      ctx.lineTo(cX - 70, cY + 60); // knee back
+      ctx.lineTo(cX - 120, cY + 130); // ankle
+      ctx.lineTo(cX - 145, cY + 120); // foot
+      ctx.stroke();
+      
+      // Left Arm (swinging backward)
+      ctx.beginPath();
+      ctx.moveTo(cX + 35, cY - 90); // shoulder
+      ctx.lineTo(cX - 30, cY - 100); // elbow
+      ctx.lineTo(cX - 80, cY - 60); // hand
+      ctx.stroke();
+      
+      // Right Arm (swinging forward)
+      ctx.beginPath();
+      ctx.moveTo(cX + 55, cY - 70); // shoulder
+      ctx.lineTo(cX + 110, cY - 50); // elbow
+      ctx.lineTo(cX + 135, cY - 100); // hand
+      ctx.stroke();
+      
+    } else if (type === 'action_jump') {
+      // 5. Action Pose: Suspended Jump Profile
+      ctx.beginPath();
+      // Head looking up
+      ctx.arc(cX - 20, cY - 160, 32, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Curved spine of jump stretch
+      ctx.beginPath();
+      ctx.moveTo(cX - 20, cY - 128);
+      ctx.quadraticCurveTo(cX - 60, cY, cX - 10, cY + 80); // arched spine
+      ctx.stroke();
+      
+      // Chest
+      ctx.beginPath();
+      ctx.ellipse(cX - 35, cY - 70, 44, 30, -Math.PI / 4, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Pelvis
+      ctx.beginPath();
+      ctx.ellipse(cX - 15, cY + 80, 28, 18, Math.PI / 6, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Left Leg (tucked in)
+      ctx.beginPath();
+      ctx.moveTo(cX - 25, cY + 75); // hip
+      ctx.lineTo(cX - 80, cY + 130); // knee
+      ctx.lineTo(cX - 40, cY + 180); // ankle
+      ctx.lineTo(cX - 55, cY + 195); // foot
+      ctx.stroke();
+      
+      // Right Leg (trailing behind)
+      ctx.beginPath();
+      ctx.moveTo(cX - 5, cY + 85); // hip
+      ctx.lineTo(cX + 40, cY + 130); // knee
+      ctx.lineTo(cX + 70, cY + 190); // ankle
+      ctx.lineTo(cX + 95, cY + 190); // foot
+      ctx.stroke();
+      
+      // Left Arm (reaching high)
+      ctx.beginPath();
+      ctx.moveTo(cX - 50, cY - 80); // shoulder
+      ctx.lineTo(cX - 90, cY - 140); // elbow
+      ctx.lineTo(cX - 110, cY - 210); // hand
+      ctx.stroke();
+      
+      // Right Arm (flung backward)
+      ctx.beginPath();
+      ctx.moveTo(cX - 20, cY - 60); // shoulder
+      ctx.lineTo(cX + 40, cY - 70); // elbow
+      ctx.lineTo(cX + 100, cY - 50); // hand
+      ctx.stroke();
+    }
+    
+    ctx.restore();
+  }, []);
+
+  const drawSymmetryGuide = useCallback((ctx: CanvasRenderingContext2D, axis: 'x' | 'y') => {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(244, 63, 94, 0.45)'; // Red/Pink trace guide
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([8, 4]);
+    ctx.beginPath();
+    if (axis === 'x') {
+      ctx.moveTo(CANVAS_WIDTH / 2, 0);
+      ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT);
+    } else {
+      ctx.moveTo(0, CANVAS_HEIGHT / 2);
+      ctx.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT / 2);
+    }
+    ctx.stroke();
+    ctx.restore();
   }, []);
 
   // Ensure active layer is selected when frame changes
@@ -420,7 +844,36 @@ export const Animation2DStudio: React.FC = () => {
         displayCtx.restore();
       }
     }
-  }, [activeFrameIndex, frames, onionSkin, showInBetweenGuide]);
+
+    // 5. ANATOMY MANNEQUIN OVERLAYS
+    if (mannequinType !== 'none') {
+      drawMannequin(displayCtx, mannequinType, mannequinOpacity);
+    }
+
+    // 6. PERSPECTIVE GRID OVERLAYS
+    if (perspectiveGrid !== 'none') {
+      drawPerspectiveGrid(displayCtx, perspectiveGrid, perspectiveOpacity);
+    }
+
+    // 7. SYMMETRY GUIDE OVERLAYS
+    if (symmetryEnabled) {
+      drawSymmetryGuide(displayCtx, symmetryAxis);
+    }
+  }, [
+    activeFrameIndex,
+    frames,
+    onionSkin,
+    showInBetweenGuide,
+    mannequinType,
+    mannequinOpacity,
+    perspectiveGrid,
+    perspectiveOpacity,
+    symmetryEnabled,
+    symmetryAxis,
+    drawMannequin,
+    drawPerspectiveGrid,
+    drawSymmetryGuide,
+  ]);
 
   useEffect(() => {
     renderComposite();
@@ -714,6 +1167,9 @@ export const Animation2DStudio: React.FC = () => {
     const pt = getCanvasCoordinates(e);
     e.currentTarget.setPointerCapture(e.pointerId);
     setIsDrawing(true);
+
+    // Reset smoothing drawing history for brush stroke stabilization
+    pointerHistoryRef.current = [pt];
     setLastPoint(pt);
     setStartShapePoint(pt);
 
@@ -747,6 +1203,13 @@ export const Animation2DStudio: React.FC = () => {
           : brush;
 
       drawBrushStroke(activeLayer.ctx, pt, pt, effectiveBrush);
+      
+      // Draw mirrored stroke if symmetry enabled
+      if (symmetryEnabled) {
+        const mirrorPt = getSymmetryPoint(pt);
+        drawBrushStroke(activeLayer.ctx, mirrorPt, mirrorPt, effectiveBrush);
+      }
+
       renderComposite();
     }
   };
@@ -760,7 +1223,34 @@ export const Animation2DStudio: React.FC = () => {
     const activeLayer = currentFrame.layers.find((l) => l.id === activeLayerId);
     if (!activeLayer || !activeLayer.visible || activeLayer.locked) return;
 
-    const pt = getCanvasCoordinates(e);
+    let pt = getCanvasCoordinates(e);
+
+    // Apply weighted smoothing stabilizer (stabilizer engine)
+    if (smoothingLevel > 0) {
+      pointerHistoryRef.current.push(pt);
+      if (pointerHistoryRef.current.length > smoothingLevel) {
+        pointerHistoryRef.current.shift();
+      }
+
+      let sumX = 0;
+      let sumY = 0;
+      let sumPressure = 0;
+      let weightSum = 0;
+
+      pointerHistoryRef.current.forEach((p, idx) => {
+        const weight = idx + 1;
+        sumX += p.x * weight;
+        sumY += p.y * weight;
+        sumPressure += (p.pressure || 0.5) * weight;
+        weightSum += weight;
+      });
+
+      pt = {
+        x: sumX / weightSum,
+        y: sumY / weightSum,
+        pressure: sumPressure / weightSum,
+      };
+    }
 
     if (activeTool === 'brush' || activeTool === 'eraser') {
       const effectiveBrush: BrushConfig =
@@ -769,6 +1259,14 @@ export const Animation2DStudio: React.FC = () => {
           : brush;
 
       drawBrushStroke(activeLayer.ctx, lastPoint, pt, effectiveBrush);
+      
+      // Draw mirrored stroke if symmetry enabled
+      if (symmetryEnabled) {
+        const mirrorLastPt = getSymmetryPoint(lastPoint);
+        const mirrorPt = getSymmetryPoint(pt);
+        drawBrushStroke(activeLayer.ctx, mirrorLastPt, mirrorPt, effectiveBrush);
+      }
+
       setLastPoint(pt);
       renderComposite();
     }
@@ -784,28 +1282,40 @@ export const Animation2DStudio: React.FC = () => {
       const endPt = getCanvasCoordinates(e);
       const ctx = activeLayer.ctx;
 
-      ctx.save();
-      ctx.strokeStyle = brush.color;
-      ctx.fillStyle = brush.color;
-      ctx.lineWidth = brush.size;
-      ctx.lineCap = 'round';
+      const drawShape = (start: Point, end: Point) => {
+        ctx.save();
+        ctx.strokeStyle = brush.color;
+        ctx.fillStyle = brush.color;
+        ctx.lineWidth = brush.size;
+        ctx.lineCap = 'round';
 
-      if (activeTool === 'line') {
-        ctx.beginPath();
-        ctx.moveTo(startShapePoint.x, startShapePoint.y);
-        ctx.lineTo(endPt.x, endPt.y);
-        ctx.stroke();
-      } else if (activeTool === 'rectangle') {
-        const w = endPt.x - startShapePoint.x;
-        const h = endPt.y - startShapePoint.y;
-        ctx.strokeRect(startShapePoint.x, startShapePoint.y, w, h);
-      } else if (activeTool === 'circle') {
-        const radius = Math.hypot(endPt.x - startShapePoint.x, endPt.y - startShapePoint.y);
-        ctx.beginPath();
-        ctx.arc(startShapePoint.x, startShapePoint.y, radius, 0, Math.PI * 2);
-        ctx.stroke();
+        if (activeTool === 'line') {
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        } else if (activeTool === 'rectangle') {
+          const w = end.x - start.x;
+          const h = end.y - start.y;
+          ctx.strokeRect(start.x, start.y, w, h);
+        } else if (activeTool === 'circle') {
+          const radius = Math.hypot(end.x - start.x, end.y - start.y);
+          ctx.beginPath();
+          ctx.arc(start.x, start.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      };
+
+      drawShape(startShapePoint, endPt);
+
+      // Draw mirrored shape if symmetry enabled
+      if (symmetryEnabled) {
+        const mirrorStart = getSymmetryPoint(startShapePoint);
+        const mirrorEnd = getSymmetryPoint(endPt);
+        drawShape(mirrorStart, mirrorEnd);
       }
-      ctx.restore();
+
       renderComposite();
     }
 
@@ -906,12 +1416,25 @@ export const Animation2DStudio: React.FC = () => {
     showToast('Desenho do Quadro Limpo');
   };
 
-  // In-between generator: interpolates between active frame and next frame
+  // In-between generator: interpolates between active frame and next frame with easing timing curves
   const handleGenerateInBetweenFrame = () => {
     if (activeFrameIndex >= frames.length - 1) return;
 
     const currFrame = frames[activeFrameIndex];
     const nextFrame = frames[activeFrameIndex + 1];
+
+    // Compute interpolation weight based on easing curve
+    let t = inBetweenTiming; // default slider ratio (typically 0.5 for linear midpoint)
+    
+    if (inBetweenEasing === 'ease-in') {
+      t = Math.pow(inBetweenTiming, 2); // Accelerating curve
+    } else if (inBetweenEasing === 'ease-out') {
+      t = 1 - Math.pow(1 - inBetweenTiming, 2); // Decelerating curve
+    } else if (inBetweenEasing === 'ease-in-out') {
+      t = inBetweenTiming < 0.5 
+        ? 2 * Math.pow(inBetweenTiming, 2) 
+        : 1 - Math.pow(-2 * inBetweenTiming + 2, 2) / 2; // Smooth cubic S-curve
+    }
 
     const newFrameLayers: AnimLayer[] = currFrame.layers.map((l, i) => {
       const nextL = nextFrame.layers[i] || l;
@@ -921,10 +1444,13 @@ export const Animation2DStudio: React.FC = () => {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       } else {
-        // Blend half opacity from current and next
-        ctx.globalAlpha = 0.5;
+        // Blend layers using custom calculated weights
+        ctx.save();
+        ctx.globalAlpha = 1 - t;
         ctx.drawImage(l.canvas, 0, 0);
+        ctx.globalAlpha = t;
         ctx.drawImage(nextL.canvas, 0, 0);
+        ctx.restore();
       }
 
       return {
@@ -943,9 +1469,9 @@ export const Animation2DStudio: React.FC = () => {
         const nextEl = nextFrame.elements[i] || el;
         return {
           id: `e_inbetween_${Date.now()}_${i}`,
-          x: (el.x + nextEl.x) / 2,
-          y: (el.y + nextEl.y) / 2,
-          radius: (el.radius + nextEl.radius) / 2,
+          x: el.x + (nextEl.x - el.x) * t,
+          y: el.y + (nextEl.y - el.y) * t,
+          radius: el.radius + (nextEl.radius - el.radius) * t,
           color: el.color,
         };
       }),
@@ -955,7 +1481,7 @@ export const Animation2DStudio: React.FC = () => {
     updated.splice(activeFrameIndex + 1, 0, newInBetweenFrame);
     setFrames(updated);
     setActiveFrameIndex(activeFrameIndex + 1);
-    showToast('Quadro Intermediário (In-Between) Gerado!');
+    showToast(`In-Between Gerado com Easing ${inBetweenEasing.toUpperCase()} (${Math.round(t*100)}%)`);
   };
 
   // Export current frame image
@@ -1161,68 +1687,343 @@ export const Animation2DStudio: React.FC = () => {
 
       {/* Main Studio Middle Layout (Canvas + Brush Presets + Layers Sidebar) */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Brush Presets Panel */}
-        <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col p-3 divide-y divide-slate-800 shrink-0 overflow-y-auto hidden lg:flex">
-          <div className="pb-3">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center justify-between">
-              <span>Pincéis & Texturas</span>
-              <span className="text-[10px] text-cyan-400 font-mono">{brush.size}px</span>
-            </h3>
+        {/* Left Control Panel (Brushes OR Advanced Art Guides) */}
+        <aside className="w-68 bg-slate-900 border-r border-slate-800 flex flex-col shrink-0 overflow-hidden hidden lg:flex">
+          {/* Sub-Header Tab Switcher */}
+          <div className="p-2.5 bg-slate-950/40 border-b border-slate-800/80 flex gap-1 shrink-0">
+            <button
+              onClick={() => setLeftTab('brushes')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                leftTab === 'brushes'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Paintbrush className="w-3.5 h-3.5" />
+              <span>Pincéis</span>
+            </button>
+            <button
+              onClick={() => setLeftTab('guides')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                leftTab === 'guides'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Guias & Timing</span>
+            </button>
+          </div>
 
-            {/* Brush Size Slider */}
-            <div className="space-y-1 mb-3">
-              <div className="flex justify-between text-[11px] text-slate-400">
-                <span>Tamanho do Pincel:</span>
-                <span className="font-mono text-cyan-400 font-bold">{brush.size}px</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="150"
-                value={brush.size}
-                onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })}
-                className="w-full accent-indigo-500"
-              />
-            </div>
-
-            {/* Category Filter Tabs */}
-            <div className="grid grid-cols-4 gap-1 mb-3">
-              {BRUSH_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  className={`p-1.5 rounded text-center transition-all ${
-                    activeCategory === cat.id
-                      ? 'bg-indigo-600 text-white font-bold shadow'
-                      : 'bg-slate-950 text-slate-400 hover:bg-slate-800'
-                  }`}
-                  title={cat.name}
-                >
-                  <span className="text-xs">{cat.icon}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Brush Presets List */}
-            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-              {ALL_BRUSH_PRESETS.filter((p) => p.category === activeCategory).map((preset) => (
-                <button
-                  key={preset.name}
-                  onClick={() => selectPreset(preset)}
-                  className={`w-full p-2 rounded-xl border text-left flex items-center gap-2 transition-all ${
-                    brush.name === preset.name
-                      ? 'bg-indigo-950/80 border-cyan-400 text-white shadow-md'
-                      : 'bg-slate-950 border-slate-800/80 text-slate-300 hover:border-slate-700'
-                  }`}
-                >
-                  <span className="text-base shrink-0">{preset.icon}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold truncate">{preset.name}</p>
-                    <p className="text-[10px] text-slate-400 truncate">{preset.description}</p>
+          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            {leftTab === 'brushes' ? (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-xs font-extrabold text-white uppercase tracking-wider mb-2 flex items-center justify-between">
+                    <span>Diâmetro do Traço</span>
+                    <span className="text-[11px] text-cyan-400 font-mono">{brush.size}px</span>
+                  </h3>
+                  
+                  {/* Brush Size Slider */}
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="1"
+                      max="150"
+                      value={brush.size}
+                      onChange={(e) => setBrush({ ...brush, size: Number(e.target.value) })}
+                      className="w-full accent-indigo-500 h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                      <span>1px</span>
+                      <span>75px</span>
+                      <span>150px</span>
+                    </div>
                   </div>
-                </button>
-              ))}
-            </div>
+                </div>
+
+                {/* Category Filter Tabs */}
+                <div>
+                  <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mb-2">Categoria</h3>
+                  <div className="grid grid-cols-4 gap-1">
+                    {BRUSH_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setActiveCategory(cat.id)}
+                        className={`p-1.5 rounded-lg text-center transition-all ${
+                          activeCategory === cat.id
+                            ? 'bg-indigo-600/95 text-white font-bold shadow-md'
+                            : 'bg-slate-950 text-slate-400 hover:bg-slate-800/80'
+                        }`}
+                        title={cat.name}
+                      >
+                        <span className="text-xs">{cat.icon}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Brush Presets List */}
+                <div className="space-y-1.5">
+                  <h3 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Presets de Pincel</h3>
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                    {ALL_BRUSH_PRESETS.filter((p) => p.category === activeCategory).map((preset) => (
+                      <button
+                        key={preset.name}
+                        onClick={() => selectPreset(preset)}
+                        className={`w-full p-2 rounded-xl border text-left flex items-center gap-2 transition-all ${
+                          brush.name === preset.name
+                            ? 'bg-indigo-950/70 border-cyan-500 text-white shadow'
+                            : 'bg-slate-950/80 border-slate-850 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        <span className="text-base shrink-0">{preset.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold truncate">{preset.name}</p>
+                          <p className="text-[9px] text-slate-400 truncate">{preset.description}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Advanced Brush Settings Accordion */}
+                <div className="pt-2 border-t border-slate-800">
+                  <button
+                    onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                    className="w-full flex items-center justify-between text-xs font-bold text-slate-400 hover:text-white transition-colors"
+                  >
+                    <span>Dinâmica de Pressão & Traço</span>
+                    {showAdvancedSettings ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+
+                  {showAdvancedSettings && (
+                    <div className="space-y-3 mt-3 p-2 bg-slate-950/60 rounded-xl border border-slate-850/60 animate-in fade-in slide-in-from-top-1 duration-150">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] text-slate-400">
+                          <span>Opacidade Base:</span>
+                          <span className="font-mono">{Math.round(brush.opacity * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          value={brush.opacity * 100}
+                          onChange={(e) => setBrush({ ...brush, opacity: Number(e.target.value) / 100 })}
+                          className="w-full accent-cyan-500 h-1 bg-slate-800"
+                        />
+                      </div>
+
+                      <div className="space-y-2 text-[10px] text-slate-300">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={brush.usePressureSize}
+                            onChange={(e) => setBrush({ ...brush, usePressureSize: e.target.checked })}
+                            className="rounded accent-indigo-500"
+                          />
+                          <span>Pressão altera diâmetro (Stylus)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={brush.usePressureOpacity}
+                            onChange={(e) => setBrush({ ...brush, usePressureOpacity: e.target.checked })}
+                            className="rounded accent-indigo-500"
+                          />
+                          <span>Pressão altera opacidade</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* 1. Stroke Stabilizer */}
+                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800">
+                  <h3 className="text-xs font-extrabold text-white uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Estabilizador</span>
+                    <span className="text-[11px] text-emerald-400 font-mono font-bold">Lvl {smoothingLevel}</span>
+                  </h3>
+                  <p className="text-[9px] text-slate-400 mb-2">Suaviza o movimento da caneta para traços perfeitamente contínuos e sem tremores.</p>
+                  <input
+                    type="range"
+                    min="0"
+                    max="15"
+                    value={smoothingLevel}
+                    onChange={(e) => setSmoothingLevel(Number(e.target.value))}
+                    className="w-full accent-emerald-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                    <span>Direto (0)</span>
+                    <span>Médio (6)</span>
+                    <span>Máximo (15)</span>
+                  </div>
+                </div>
+
+                {/* 2. Symmetry Guide */}
+                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h3 className="text-xs font-extrabold text-white uppercase tracking-wider">Desenho Espelhado</h3>
+                    <button
+                      onClick={() => setSymmetryEnabled(!symmetryEnabled)}
+                      className={`text-[10px] px-2 py-0.5 rounded font-extrabold transition-all border ${
+                        symmetryEnabled
+                          ? 'bg-rose-950 text-rose-300 border-rose-800'
+                          : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
+                      }`}
+                    >
+                      {symmetryEnabled ? 'ATIVADO' : 'DESATIVAR'}
+                    </button>
+                  </div>
+                  <p className="text-[9px] text-slate-400 mb-2.5">Simetria radial perfeita ideal para rostos, roupas e robôs simétricos.</p>
+                  
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => setSymmetryAxis('x')}
+                      disabled={!symmetryEnabled}
+                      className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
+                        symmetryAxis === 'x' && symmetryEnabled
+                          ? 'bg-rose-600/25 text-rose-200 border-rose-500'
+                          : 'bg-slate-950 text-slate-500 border-slate-900 disabled:opacity-40'
+                      }`}
+                    >
+                      Eixo X (Horizontal)
+                    </button>
+                    <button
+                      onClick={() => setSymmetryAxis('y')}
+                      disabled={!symmetryEnabled}
+                      className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
+                        symmetryAxis === 'y' && symmetryEnabled
+                          ? 'bg-rose-600/25 text-rose-200 border-rose-500'
+                          : 'bg-slate-950 text-slate-500 border-slate-900 disabled:opacity-40'
+                      }`}
+                    >
+                      Eixo Y (Vertical)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Mannequins for Character Art */}
+                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800 space-y-2.5">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-white uppercase tracking-wider mb-1">Manequim de Anatomia</h3>
+                    <p className="text-[9px] text-slate-400">Guia proporcional para desenhar cabeças, corpos e poses complexas de personagens.</p>
+                  </div>
+
+                  <select
+                    value={mannequinType}
+                    onChange={(e: any) => setMannequinType(e.target.value)}
+                    className="w-full bg-slate-950 text-slate-200 text-xs py-1.5 px-2 rounded-lg border border-slate-800 font-bold focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="none">Nenhum (Tela Limpa)</option>
+                    <option value="loomis_f">Cabeça Loomis (Frente)</option>
+                    <option value="loomis_p">Cabeça Loomis (Perfil)</option>
+                    <option value="mannequin_f">Proporções (8 Cabeças)</option>
+                    <option value="action_run">Corrida (Pose de Ação)</option>
+                    <option value="action_jump">Salto No Ar (Pose de Ação)</option>
+                  </select>
+
+                  {mannequinType !== 'none' && (
+                    <div className="space-y-1 animate-in fade-in duration-150">
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span>Opacidade do Manequim:</span>
+                        <span className="font-mono text-cyan-400 font-bold">{Math.round(mannequinOpacity * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="0.8"
+                        step="0.05"
+                        value={mannequinOpacity}
+                        onChange={(e) => setMannequinOpacity(Number(e.target.value))}
+                        className="w-full accent-indigo-500 h-1 bg-slate-850"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Perspective Grid */}
+                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800 space-y-2.5">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-white uppercase tracking-wider mb-1">Perspectiva Tridimensional</h3>
+                    <p className="text-[9px] text-slate-400">Guia de pontos de fuga para construir cenários e arquitetura de fundo em 3D.</p>
+                  </div>
+
+                  <select
+                    value={perspectiveGrid}
+                    onChange={(e: any) => setPerspectiveGrid(e.target.value)}
+                    className="w-full bg-slate-950 text-slate-200 text-xs py-1.5 px-2 rounded-lg border border-slate-800 font-bold focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="none">Sem Grade</option>
+                    <option value="1point">1 Ponto de Fuga (Cenário Central)</option>
+                    <option value="2point">2 Pontos de Fuga (Cenário Angular)</option>
+                  </select>
+
+                  {perspectiveGrid !== 'none' && (
+                    <div className="space-y-1 animate-in fade-in duration-150">
+                      <div className="flex justify-between text-[10px] text-slate-400">
+                        <span>Opacidade da Grade:</span>
+                        <span className="font-mono text-cyan-400 font-bold">{Math.round(perspectiveOpacity * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="0.8"
+                        step="0.05"
+                        value={perspectiveOpacity}
+                        onChange={(e) => setPerspectiveOpacity(Number(e.target.value))}
+                        className="w-full accent-indigo-500 h-1 bg-slate-850"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 5. In-Between Timing Easing Setup */}
+                <div className="p-2.5 bg-slate-950/40 rounded-xl border border-slate-800 space-y-2.5">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-white uppercase tracking-wider mb-1">Timing & Espaçamento</h3>
+                    <p className="text-[9px] text-slate-400">Controla a aceleração e o ponto físico onde o quadro intermediário será gerado.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] text-slate-400 block">Curva de Easing (Aceleração):</span>
+                    <select
+                      value={inBetweenEasing}
+                      onChange={(e: any) => setInBetweenEasing(e.target.value)}
+                      className="w-full bg-slate-950 text-slate-200 text-xs py-1.5 px-2 rounded-lg border border-slate-800 font-bold focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="linear">Velocidade Constante (Linear)</option>
+                      <option value="ease-in">Aceleração (Slow-In)</option>
+                      <option value="ease-out">Desaceleração (Slow-Out)</option>
+                      <option value="ease-in-out">Aceleração & Desaceleração (S-Curve)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>Proporção do Timing:</span>
+                      <span className="font-mono text-amber-400 font-bold">{Math.round(inBetweenTiming * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="0.9"
+                      step="0.05"
+                      value={inBetweenTiming}
+                      onChange={(e) => setInBetweenTiming(Number(e.target.value))}
+                      className="w-full accent-amber-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>Início (10%)</span>
+                      <span>Meio (50%)</span>
+                      <span>Fim (90%)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </aside>
 
