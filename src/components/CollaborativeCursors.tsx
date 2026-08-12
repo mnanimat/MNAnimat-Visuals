@@ -17,11 +17,15 @@ interface CollaborativeCursorsProps {
   currentMode: AppMode;
   enabled?: boolean;
   onToggleEnabled?: () => void;
+  projectId: string;
+  onCollaboratorsChange?: (collaborators: any[]) => void;
 }
 
 export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
   currentMode,
   enabled = true,
+  projectId,
+  onCollaboratorsChange,
 }) => {
   const [remoteUsers, setRemoteUsers] = useState<Record<string, RemoteUser>>({});
   const [clickRipples, setClickRipples] = useState<
@@ -57,10 +61,10 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
 
   // Initialize Broadcast Channel
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !projectId) return;
 
     try {
-      const channel = new BroadcastChannel('mnanimat_collab_cursors');
+      const channel = new BroadcastChannel(`mnanimat_collab_cursors_${projectId}`);
       channelRef.current = channel;
 
       channel.onmessage = (event) => {
@@ -99,7 +103,22 @@ export const CollaborativeCursors: React.FC<CollaborativeCursorsProps> = ({
     } catch (e) {
       console.warn('BroadcastChannel not supported or failed:', e);
     }
-  }, [enabled]);
+  }, [enabled, projectId]);
+
+  useEffect(() => {
+    if (onCollaboratorsChange) {
+      const activeCollaborators = Object.values(remoteUsers).map((u: RemoteUser) => ({
+        id: u.id,
+        name: u.name,
+        color: u.color,
+        avatar: u.name.substring(0, 2).toUpperCase(),
+        role: 'Colaborador',
+        currentMode: u.mode,
+        activeTool: u.activeTool,
+      }));
+      onCollaboratorsChange(activeCollaborators);
+    }
+  }, [remoteUsers, onCollaboratorsChange]);
 
   // Broadcast own mouse movements
   useEffect(() => {

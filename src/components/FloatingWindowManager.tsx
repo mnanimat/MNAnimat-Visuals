@@ -11,6 +11,7 @@ import {
   Sliders,
   Clock,
   Eye,
+  EyeOff,
   RotateCcw,
   LayoutGrid,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ interface FloatingWindowManagerProps {
   onResetWindows: () => void;
   onMinimizeAllWindows?: () => void;
   renderContent: (type: FloatingWindow['content']) => React.ReactNode;
+  isAllHidden?: boolean;
 }
 
 export const FloatingWindowManager: React.FC<FloatingWindowManagerProps> = ({
@@ -30,6 +32,7 @@ export const FloatingWindowManager: React.FC<FloatingWindowManagerProps> = ({
   onResetWindows,
   onMinimizeAllWindows,
   renderContent,
+  isAllHidden = false,
 }) => {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -153,7 +156,7 @@ export const FloatingWindowManager: React.FC<FloatingWindowManagerProps> = ({
         </button>
       </div>
 
-      {windows.map((win) => {
+      {!isAllHidden && windows.map((win) => {
         const Icon = getIcon(win.content);
         if (win.isMinimized) {
           // Render minimized taskbar tab at bottom

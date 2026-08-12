@@ -79,6 +79,7 @@ export default function App() {
   const [activeLayoutName, setActiveLayoutName] = useState<string>('Desenho Vetorial');
   const [cursorsEnabled, setCursorsEnabled] = useState<boolean>(true);
   const [floatingWindows, setFloatingWindows] = useState<FloatingWindow[]>(INITIAL_WINDOWS);
+  const [isWindowsHidden, setIsWindowsHidden] = useState<boolean>(true);
 
   // Automatically adjust currentMode if active project dictates it
   useEffect(() => {
@@ -179,27 +180,8 @@ export default function App() {
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
-  // Real-time team collaborators sample state
-  const [collaborators] = useState<Collaborator[]>([
-    {
-      id: 'collab_1',
-      name: 'Ana Silva',
-      color: '#ec4899',
-      avatar: 'AS',
-      role: 'Design Lead',
-      currentMode: 'painting',
-      activeTool: 'Pincel Aquarela',
-    },
-    {
-      id: 'collab_2',
-      name: 'Carlos Ramos',
-      color: '#3b82f6',
-      avatar: 'CR',
-      role: 'Modelador 3D',
-      currentMode: '3d_render',
-      activeTool: 'Shaders PBR',
-    },
-  ]);
+  // Real-time team collaborators state
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
 
   // Global Keyboard Shortcuts Listener
   useEffect(() => {
@@ -316,7 +298,12 @@ export default function App() {
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-950 font-sans text-slate-100 overflow-hidden antialiased relative">
       {/* Real-time Collaboration Live Cursors Overlay */}
-      <CollaborativeCursors enabled={cursorsEnabled} currentMode={currentMode} />
+      <CollaborativeCursors
+        enabled={cursorsEnabled}
+        currentMode={currentMode}
+        projectId={activeProjectId || 'proj_default'}
+        onCollaboratorsChange={setCollaborators}
+      />
 
       {/* Floating Windows Customizer */}
       <FloatingWindowManager
@@ -325,6 +312,7 @@ export default function App() {
         onResetWindows={handleResetWindows}
         onMinimizeAllWindows={handleMinimizeAllWindows}
         renderContent={renderFloatingContent}
+        isAllHidden={isWindowsHidden}
       />
 
       {/* Top Header Navigation */}
@@ -340,6 +328,8 @@ export default function App() {
         onOpenLayoutModal={() => setIsLayoutModalOpen(true)}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenDashboard={() => setActiveProjectId(null)}
+        isWindowsHidden={isWindowsHidden}
+        onToggleWindows={() => setIsWindowsHidden((prev) => !prev)}
         collaborators={collaborators}
         activeLayoutName={activeLayoutName}
         onUndo={undoState?.canUndo ? undoState.undo : undefined}

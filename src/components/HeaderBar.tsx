@@ -24,6 +24,10 @@ import {
   Save,
   Download,
   FolderKanban,
+  Eye,
+  EyeOff,
+  Share2,
+  ClipboardCheck,
 } from 'lucide-react';
 import { AppMode, CloudStorageConfig, Collaborator } from '../types';
 
@@ -36,6 +40,8 @@ interface HeaderBarProps {
   onOpenLayoutModal: () => void;
   onOpenExportModal?: () => void;
   onOpenDashboard?: () => void;
+  isWindowsHidden?: boolean;
+  onToggleWindows?: () => void;
   collaborators: Collaborator[];
   activeLayoutName: string;
   onUndo?: () => void;
@@ -76,6 +82,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenLayoutModal,
   onOpenExportModal,
   onOpenDashboard,
+  isWindowsHidden = false,
+  onToggleWindows,
   collaborators,
   activeLayoutName,
   onUndo,
@@ -110,6 +118,16 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   });
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleCopyShareLink = () => {
+    const activeProject = localStorage.getItem('mn_active_project_id') || 'proj_default';
+    const shareUrl = `${window.location.origin}${window.location.pathname}?shared=true&project=${activeProject}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 3000);
+    });
+  };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
@@ -257,6 +275,21 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           </button>
         )}
 
+        {/* Toggle Floating Windows */}
+        {onToggleWindows && (
+          <button
+            onClick={onToggleWindows}
+            title={isWindowsHidden ? 'Mostrar janelas flutuantes' : 'Ocultar janelas flutuantes'}
+            className="flex items-center justify-center w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
+          >
+            {isWindowsHidden ? (
+              <Eye className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <EyeOff className="w-4 h-4 text-rose-400" />
+            )}
+          </button>
+        )}
+
         {/* Layout Customizer */}
         <button
           onClick={onOpenLayoutModal}
@@ -278,6 +311,20 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <span className="hidden sm:inline">Exportar Projeto</span>
           </button>
         )}
+
+        {/* Share Design Button */}
+        <button
+          onClick={handleCopyShareLink}
+          title="Compartilhar Design (Cloudflare Pages)"
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+            isCopied
+              ? 'bg-emerald-900/60 border-emerald-500/50 text-emerald-300'
+              : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/60 text-slate-200'
+          }`}
+        >
+          {isCopied ? <ClipboardCheck className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5 text-cyan-400" />}
+          <span className="hidden sm:inline">{isCopied ? 'Link Copiado!' : 'Compartilhar'}</span>
+        </button>
 
         {/* Auto-Save Indicator & Manual Save Trigger */}
         <button
